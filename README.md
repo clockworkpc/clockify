@@ -24,11 +24,6 @@ sudo apt update
 sudo apt install curl gawk
 ```
 
-### Optional (for notifications)
-- **xcowsay** - Desktop notifications when starting/stopping entries
-  - Arch: `sudo pacman -S xcowsay`
-  - Ubuntu: `sudo apt install xcowsay`
-
 ## Installation
 
 1. **Clone or download the script**:
@@ -168,6 +163,14 @@ clockify start --task-name "Code Review"
 
 # Stop current entry
 clockify stop
+```
+
+## Use with Gnome Pomodoro
+
+Enable Custom Actions and create a new action with the command:
+
+```bash
+/bin/sh -lc '~/.local/bin/clockify "$(triggers)"'
 ```
 
 ## License
