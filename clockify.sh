@@ -7,7 +7,7 @@ CONFIG_FILE="$CONFIG_DIR/clockifyrc"
 STATE_FILE="$CONFIG_DIR/.clockify_state"
 
 usage() {
-  echo "Usage: $0 start|stop|start enable|resume|pause|skip|complete [options...]"
+  echo "Usage: $0 start|stop|start enable|resume|pause|skip|complete|info [options...]"
   echo ""
   echo "Commands:"
   echo "  start              - Start a new time entry"
@@ -18,6 +18,7 @@ usage() {
   echo "  skip               - Stop the current time entry (pomodoro trigger)"
   echo "  skip disable       - Stop the current time entry (pomodoro trigger)"
   echo "  complete           - Stop the current time entry (pomodoro trigger)"
+  echo "  info               - Show pomodoro work and pause status"
   echo ""
   echo "Options can be provided in any combination:"
   echo "  --token <token>           Clockify API token"
@@ -61,8 +62,106 @@ get_user_id() {
 }
 
 get_current_time_entry() {
+  local user_id=$(get_user_id)
   curl -s -H "X-Api-Key: $CLOCKIFY_TOKEN" \
-    "https://api.clockify.me/api/v1/workspaces/$CLOCKIFY_WORKSPACE_ID/timeEntries/inProgress"
+    "https://api.clockify.me/api/v1/workspaces/$CLOCKIFY_WORKSPACE_ID/user/$user_id/time-entries?in-progress=true"
+}
+
+get_workspaces() {
+  curl -s -H "X-Api-Key: $CLOCKIFY_TOKEN" \
+    "https://api.clockify.me/api/v1/workspaces"
+}
+
+get_projects() {
+  curl -s -H "X-Api-Key: $CLOCKIFY_TOKEN" \
+    "https://api.clockify.me/api/v1/workspaces/$CLOCKIFY_WORKSPACE_ID/projects"
+}
+
+show_info() {
+  # Check required parameters
+  if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" ]]; then
+    echo "Error: Missing required configuration:" >&2
+    [[ -z "$CLOCKIFY_TOKEN" ]] && echo "  - token" >&2
+    [[ -z "$CLOCKIFY_WORKSPACE_ID" ]] && echo "  - workspace_id" >&2
+    exit 1
+  fi
+
+  # Show workspaces and projects (equivalent to -w)
+  echo "Workspaces and Projects:"
+  workspaces=$(get_workspaces)
+  projects=$(get_projects)
+  
+  # Extract and display workspace info
+  workspace_id=$(echo "$workspaces" | grep -o '"id":"'$CLOCKIFY_WORKSPACE_ID'"' | cut -d'"' -f4)
+  workspace_name=$(echo "$workspaces" | sed -n 's/.*"id":"'$CLOCKIFY_WORKSPACE_ID'".*"name":"\([^"]*\)".*/\1/p')
+  echo "$CLOCKIFY_WORKSPACE_ID $workspace_name"
+  
+  # Extract and display project info
+  echo "$projects" | grep -o '"id":"[^"]*","name":"[^"]*"' | while read -r line; do
+    project_id=$(echo "$line" | cut -d'"' -f4)
+    project_name=$(echo "$line" | cut -d'"' -f8)
+    echo "$project_id $project_name"
+  done
+  
+  echo ""
+  
+  # Show current time entry info (equivalent to -p)
+  current_entries=$(get_current_time_entry)
+  
+  # Check if the response is an empty array or contains no entries
+  if [[ "$current_entries" == "[]" || -z "$current_entries" ]]; then
+    echo "No active time entry"
+  else
+    # Debug: show the raw JSON response
+    echo "DEBUG: Current entry JSON:"
+    echo "$current_entries"
+    echo "---"
+    
+    # Extract the first (and should be only) entry from the array
+    current_entry=$(echo "$current_entries" | jq -r '.[0]' 2>/dev/null)
+    if [[ "$current_entry" == "null" || -z "$current_entry" ]]; then
+      echo "No active time entry"
+    else
+      echo "Plugin       Clockify"
+      echo "Type         Time Entry"
+      
+      # Extract description/task name
+      description=$(echo "$current_entry" | jq -r '.description // empty' 2>/dev/null)
+      if [[ -z "$description" ]]; then
+        description=$(echo "$current_entry" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')
+      fi
+      echo "Name         $description"
+      
+      # Calculate elapsed time
+      start_time=$(echo "$current_entry" | jq -r '.timeInterval.start // empty' 2>/dev/null)
+      if [[ -z "$start_time" ]]; then
+        start_time=$(echo "$current_entry" | sed -n 's/.*"start":"\([^"]*\)".*/\1/p')
+      fi
+      
+      if [[ -n "$start_time" ]]; then
+        # Convert ISO 8601 to Unix timestamp and calculate elapsed minutes
+        start_epoch=$(date -d "$start_time" +%s 2>/dev/null || echo "0")
+        current_epoch=$(date +%s)
+        elapsed_seconds=$((current_epoch - start_epoch))
+        elapsed_minutes=$(echo "scale=2; $elapsed_seconds / 60" | bc -l 2>/dev/null || echo "0")
+        echo "Elapsed      $elapsed_minutes Min"
+      else
+        echo "Elapsed      Unknown"
+      fi
+      
+      echo "Workspace    $workspace_name"
+      
+      # Get project name for current entry
+      project_id=$(echo "$current_entry" | jq -r '.projectId // empty' 2>/dev/null)
+      if [[ -z "$project_id" ]]; then
+        project_id=$(echo "$current_entry" | sed -n 's/.*"projectId":"\([^"]*\)".*/\1/p')
+      fi
+      if [[ -n "$project_id" ]]; then
+        project_name=$(echo "$projects" | sed -n 's/.*"id":"'$project_id'".*"name":"\([^"]*\)".*/\1/p')
+        echo "Project      $project_name"
+      fi
+    fi
+  fi
 }
 
 start_time_entry() {
@@ -273,6 +372,9 @@ case "$1" in
   fi
 
   stop_time_entry
+  ;;
+"info")
+  show_info
   ;;
 *)
   # Default case - treat anything else as stop
