@@ -90,24 +90,24 @@ show_info() {
   echo "Workspaces and Projects:"
   workspaces=$(get_workspaces)
   projects=$(get_projects)
-  
+
   # Extract and display workspace info
   workspace_id=$(echo "$workspaces" | grep -o '"id":"'$CLOCKIFY_WORKSPACE_ID'"' | cut -d'"' -f4)
   workspace_name=$(echo "$workspaces" | sed -n 's/.*"id":"'$CLOCKIFY_WORKSPACE_ID'".*"name":"\([^"]*\)".*/\1/p')
   echo "$CLOCKIFY_WORKSPACE_ID $workspace_name"
-  
+
   # Extract and display project info
   echo "$projects" | grep -o '"id":"[^"]*","name":"[^"]*"' | while read -r line; do
     project_id=$(echo "$line" | cut -d'"' -f4)
     project_name=$(echo "$line" | cut -d'"' -f8)
     echo "$project_id $project_name"
   done
-  
+
   echo ""
-  
+
   # Show current time entry info (equivalent to -p)
   current_entries=$(get_current_time_entry)
-  
+
   # Check if the response is an empty array or contains no entries
   if [[ "$current_entries" == "[]" || -z "$current_entries" ]]; then
     echo "No active time entry"
@@ -116,7 +116,7 @@ show_info() {
     echo "DEBUG: Current entry JSON:"
     echo "$current_entries"
     echo "---"
-    
+
     # Extract the first (and should be only) entry from the array
     current_entry=$(echo "$current_entries" | jq -r '.[0]' 2>/dev/null)
     if [[ "$current_entry" == "null" || -z "$current_entry" ]]; then
@@ -124,20 +124,20 @@ show_info() {
     else
       echo "Plugin       Clockify"
       echo "Type         Time Entry"
-      
+
       # Extract description/task name
       description=$(echo "$current_entry" | jq -r '.description // empty' 2>/dev/null)
       if [[ -z "$description" ]]; then
         description=$(echo "$current_entry" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')
       fi
       echo "Name         $description"
-      
+
       # Calculate elapsed time
       start_time=$(echo "$current_entry" | jq -r '.timeInterval.start // empty' 2>/dev/null)
       if [[ -z "$start_time" ]]; then
         start_time=$(echo "$current_entry" | sed -n 's/.*"start":"\([^"]*\)".*/\1/p')
       fi
-      
+
       if [[ -n "$start_time" ]]; then
         # Convert ISO 8601 to Unix timestamp and calculate elapsed minutes
         start_epoch=$(date -d "$start_time" +%s 2>/dev/null || echo "0")
@@ -148,9 +148,9 @@ show_info() {
       else
         echo "Elapsed      Unknown"
       fi
-      
+
       echo "Workspace    $workspace_name"
-      
+
       # Get project name for current entry
       project_id=$(echo "$current_entry" | jq -r '.projectId // empty' 2>/dev/null)
       if [[ -z "$project_id" ]]; then
@@ -190,6 +190,7 @@ start_time_entry() {
   if [[ -n "$entry_id" ]]; then
     echo "Time entry started successfully (ID: $entry_id)"
     echo "$entry_id" >"$STATE_FILE"
+    xcowsay "Time entry started: $CLOCKIFY_TASK_NAME"
   else
     echo "Error starting time entry:" >&2
     echo "$response" >&2
