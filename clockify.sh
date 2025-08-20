@@ -2,6 +2,7 @@
 
 set -e
 
+
 CONFIG_DIR="$HOME/.config/clockify"
 CONFIG_FILE="$CONFIG_DIR/clockifyrc"
 STATE_FILE="$CONFIG_DIR/.clockify_state"
@@ -35,6 +36,90 @@ usage() {
   echo "  $0 --task-name \"New Task\"                  # Change task name only"
   exit 1
 }
+
+start_pomodoro() {
+  # Start a work session (Pomodoro)
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.Start
+}
+
+stop_pomodoro() {
+  # Stop the current session
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.Stop
+}
+
+pause_pomodoro() {
+  # Pause the current session
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.Pause
+}
+
+resume_pomodoro() {
+  # Resume the current session
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.Resume
+}
+
+skip_pomodoro() {
+  # Skip to next session (e.g., from work to break)
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.Skip
+}
+
+short_break() {
+  # Switch immediately to a short break
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.SetState 'short-break' 0.0
+}
+
+set_work_duration() {
+  # Set work (pomodoro) length to 20 minutes
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.gnome.Pomodoro.SetStateDuration 'pomodoro' 1200.0
+}
+
+get_all_properties() {
+  # All properties
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.freedesktop.DBus.Properties.GetAll org.gnome.Pomodoro
+}
+
+get_current_state() {
+  # Single property (current state)
+  gdbus call --session \
+    --dest org.gnome.Pomodoro \
+    --object-path /org/gnome/Pomodoro \
+    --method org.freedesktop.DBus.Properties.Get \
+    org.gnome.Pomodoro State
+}
+
+is_pomodoro_running() {
+  local state=$(get_current_state 2>/dev/null | grep -o "'[^']*'" | tr -d "'")
+  [[ "$state" == "pomodoro" ]]
+}
+
+is_clockify_running() {
+  local current_entry=$(get_current_time_entry)
+  [[ "$current_entry" != "[]" && -n "$current_entry" ]]
+}
+
 
 load_config() {
   if [[ -f "$CONFIG_FILE" ]]; then
@@ -165,6 +250,12 @@ show_info() {
 }
 
 start_time_entry() {
+  # Check if a timer is already running
+  if is_clockify_running; then
+    echo "Clockify timer is already running, skipping start"
+    return 0
+  fi
+
   local start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local user_id=$(get_user_id)
 
@@ -286,8 +377,8 @@ fi
 
 load_config
 
-# Check if only --task_name is provided (task name change only)
-if [[ $# -eq 2 && "$1" == "--task_name" ]]; then
+# Check if only --task-name is provided (task name change only)
+if [[ $# -eq 2 && "$1" == "--task-name" ]]; then
   # Check for required config
   if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" ]]; then
     echo "Error: Missing required configuration:" >&2
@@ -296,96 +387,118 @@ if [[ $# -eq 2 && "$1" == "--task_name" ]]; then
     exit 1
   fi
 
-  # Check if there's a current time entry running
-  current_entry=$(get_current_time_entry)
-  if [[ "$current_entry" != "null" && -n "$current_entry" ]]; then
-    echo "Stopping current time entry before changing task name..."
+  # Check if both timers are running
+  pomodoro_running=false
+  clockify_running=false
+  
+  if is_pomodoro_running; then
+    pomodoro_running=true
+    echo "Pomodoro timer is running"
+  fi
+  
+  if is_clockify_running; then
+    clockify_running=true
+    echo "Clockify timer is running"
+  fi
+
+  # Always stop clockify timer if running
+  if [[ "$clockify_running" == "true" ]]; then
+    echo "Stopping Clockify timer..."
+    current_entry=$(get_current_time_entry)
     entry_id=$(echo "$current_entry" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     if [[ -n "$entry_id" ]]; then
       echo "$entry_id" >"$STATE_FILE"
       stop_time_entry || echo "Continuing with task name update..."
     fi
-  else
-    echo "No active time entry found."
-    # Clean up state file if it exists but no entry is running
-    [[ -f "$STATE_FILE" ]] && rm -f "$STATE_FILE"
+  fi
+
+  # If both were running, pause pomodoro (instead of stopping)
+  if [[ "$pomodoro_running" == "true" && "$clockify_running" == "true" ]]; then
+    echo "Pausing Pomodoro timer..."
+    pause_pomodoro
+  elif [[ "$pomodoro_running" == "true" ]]; then
+    echo "Stopping Pomodoro timer..."
+    stop_pomodoro
   fi
 
   # Update task name in config
   CLOCKIFY_TASK_NAME="$2"
   save_config
   echo "Task name updated to: $CLOCKIFY_TASK_NAME"
-  echo "Use 'clockify start' to begin tracking with the new task name."
+
+  # If both were running, resume pomodoro and start clockify
+  if [[ "$pomodoro_running" == "true" && "$clockify_running" == "true" ]]; then
+    echo "Resuming Pomodoro timer and starting Clockify timer with new task name..."
+    if [[ -n "$CLOCKIFY_PROJECT_ID" ]]; then
+      start_time_entry
+      sleep 1  # Give clockify time to start before pomodoro resumes
+      resume_pomodoro
+      echo "Both timers resumed/started with new task name"
+    else
+      echo "Error: Missing project_id, cannot restart Clockify timer"
+      exit 1
+    fi
+  else
+    echo "Use 'clockify start' to begin tracking with the new task name."
+  fi
+  
   exit 0
 fi
 
+# Function to check for required parameters
+check_required() {
+  local missing_params=()
+  for param in "$@"; do
+    if [[ -z "${!param}" ]]; then
+      missing_params+=("$param")
+    fi
+  done
+
+  if [[ ${#missing_params[@]} -ne 0 ]]; then
+    echo "Error: Missing required configuration:" >&2
+    for missing in "${missing_params[@]}"; do
+      echo "  - $missing" >&2
+    done
+    exit 1
+  fi
+}
+
+start() {
+  if [[ $# -gt 0 ]]; then
+    parse_args "start" "$@"
+  fi
+  check_required CLOCKIFY_TOKEN CLOCKIFY_WORKSPACE_ID CLOCKIFY_PROJECT_ID CLOCKIFY_TASK_NAME
+  start_time_entry
+}
+
+stop() {
+  if [[ $# -gt 0 ]]; then
+    parse_args "stop" "$@"
+  fi
+  check_required CLOCKIFY_TOKEN CLOCKIFY_WORKSPACE_ID
+  stop_time_entry
+}
+
+info() {
+  show_info
+}
+
+default() {
+  check_required CLOCKIFY_TOKEN CLOCKIFY_WORKSPACE_ID
+  stop_time_entry
+}
+
 case "$1" in
-"start")
-  parse_args "$@"
-
-  # Check required parameters for starting
-  if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" || -z "$CLOCKIFY_PROJECT_ID" || -z "$CLOCKIFY_TASK_NAME" ]]; then
-    echo "Error: Missing required configuration:" >&2
-    [[ -z "$CLOCKIFY_TOKEN" ]] && echo "  - token (--token)" >&2
-    [[ -z "$CLOCKIFY_WORKSPACE_ID" ]] && echo "  - workspace_id (--workspace-id)" >&2
-    [[ -z "$CLOCKIFY_PROJECT_ID" ]] && echo "  - project_id (--project-id)" >&2
-    [[ -z "$CLOCKIFY_TASK_NAME" ]] && echo "  - task_name (--task-name)" >&2
-    exit 1
-  fi
-
-  start_time_entry
+"start" | "start enable" | "resume")
+  start
   ;;
-"stop")
-  parse_args "$@"
-
-  # Check required parameters for stopping
-  if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" ]]; then
-    echo "Error: Missing required configuration:" >&2
-    [[ -z "$CLOCKIFY_TOKEN" ]] && echo "  - token (--token)" >&2
-    [[ -z "$CLOCKIFY_WORKSPACE_ID" ]] && echo "  - workspace_id (--workspace-id)" >&2
-    exit 1
-  fi
-
-  stop_time_entry
-  ;;
-"start enable")
-  # Pomodoro triggers that should start a time entry
-  # Check required parameters for starting
-  if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" || -z "$CLOCKIFY_PROJECT_ID" || -z "$CLOCKIFY_TASK_NAME" ]]; then
-    echo "Error: Missing required configuration:" >&2
-    [[ -z "$CLOCKIFY_TOKEN" ]] && echo "  - token" >&2
-    [[ -z "$CLOCKIFY_WORKSPACE_ID" ]] && echo "  - workspace_id" >&2
-    [[ -z "$CLOCKIFY_PROJECT_ID" ]] && echo "  - project_id" >&2
-    [[ -z "$CLOCKIFY_TASK_NAME" ]] && echo "  - task_name" >&2
-    exit 1
-  fi
-
-  start_time_entry
-  ;;
-"pause" | "skip" | "skip disable" | "complete" | "resume")
-  # Pomodoro triggers that should stop a time entry
-  # Check required parameters for stopping
-  if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" ]]; then
-    echo "Error: Missing required configuration:" >&2
-    [[ -z "$CLOCKIFY_TOKEN" ]] && echo "  - token" >&2
-    [[ -z "$CLOCKIFY_WORKSPACE_ID" ]] && echo "  - workspace_id" >&2
-    exit 1
-  fi
-
-  stop_time_entry
+"stop" | "pause" | "skip" | "skip disable" | "complete")
+  stop
   ;;
 "info")
-  show_info
+  info
   ;;
 *)
-  # Default case - treat anything else as stop
-  if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" ]]; then
-    echo "Error: Missing required configuration:" >&2
-    [[ -z "$CLOCKIFY_TOKEN" ]] && echo "  - token" >&2
-    [[ -z "$CLOCKIFY_WORKSPACE_ID" ]] && echo "  - workspace_id" >&2
-    exit 1
-  fi
-
-  stop_time_entry
+  default
   ;;
 esac
