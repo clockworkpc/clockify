@@ -256,6 +256,14 @@ start_time_entry() {
     return 0
   fi
 
+  # For pomodoro integration: only start if pomodoro is actually in work state
+  # This prevents 5-second entries when break ends but work hasn't actually started
+  local pomodoro_state=$(get_current_state 2>/dev/null | grep -o "'[^']*'" | tr -d "'")
+  if [[ -n "$pomodoro_state" && "$pomodoro_state" != "pomodoro" ]]; then
+    echo "Pomodoro not in work state ($pomodoro_state), skipping Clockify start"
+    return 0
+  fi
+
   local start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local user_id=$(get_user_id)
 
