@@ -2,13 +2,12 @@
 
 set -e
 
-
 CONFIG_DIR="$HOME/.config/clockify"
 CONFIG_FILE="$CONFIG_DIR/clockifyrc"
 STATE_FILE="$CONFIG_DIR/.clockify_state"
 
 usage() {
-  echo "Usage: $0 start|stop|start enable|resume|pause|skip|complete|info [options...]"
+  echo "Usage: $0 start|stop|start enable|resume|pause|skip|complete|info|tasks|task [options...]"
   echo ""
   echo "Commands:"
   echo "  start              - Start a new time entry"
@@ -20,6 +19,8 @@ usage() {
   echo "  skip disable       - Stop the current time entry (pomodoro trigger)"
   echo "  complete           - Stop the current time entry (pomodoro trigger)"
   echo "  info               - Show pomodoro work and pause status"
+  echo "  tasks              - List all tasks for the current project"
+  echo "  task               - Interactively select and set task name from previous entries"
   echo ""
   echo "Options can be provided in any combination:"
   echo "  --token <token>           Clockify API token"
@@ -33,6 +34,7 @@ usage() {
   echo "  $0 start --project-id <id> --task-name <name>  # New project and task"
   echo "  $0 start --token <token> --workspace-id <id> --project-id <id> --task-name <name>  # Full config"
   echo "  $0 stop                                     # Stop current entry"
+  echo "  $0 task                                     # Interactively select task name"
   echo "  $0 --task-name \"New Task\"                  # Change task name only"
   exit 1
 }
@@ -120,7 +122,6 @@ is_clockify_running() {
   [[ "$current_entry" != "[]" && -n "$current_entry" ]]
 }
 
-
 load_config() {
   if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
@@ -162,6 +163,63 @@ get_projects() {
     "https://api.clockify.me/api/v1/workspaces/$CLOCKIFY_WORKSPACE_ID/projects"
 }
 
+get_current_project_id() {
+  # Try to get project ID from active time entry first
+  local current_entry=$(get_current_time_entry)
+  if [[ "$current_entry" != "[]" && -n "$current_entry" ]]; then
+    local project_id=$(echo "$current_entry" | jq -r '.[0].projectId // empty' 2>/dev/null)
+    if [[ -z "$project_id" ]]; then
+      project_id=$(echo "$current_entry" | sed -n 's/.*"projectId":"\([^"]*\)".*/\1/p')
+    fi
+    if [[ -n "$project_id" ]]; then
+      echo "$project_id"
+      return 0
+    fi
+  fi
+
+  # Fall back to configured project ID
+  if [[ -n "$CLOCKIFY_PROJECT_ID" ]]; then
+    echo "$CLOCKIFY_PROJECT_ID"
+    return 0
+  fi
+
+  return 1
+}
+
+get_tasks() {
+  local project_id="$1"
+  if [[ -z "$project_id" ]]; then
+    project_id=$(get_current_project_id)
+    if [[ -z "$project_id" ]]; then
+      return 1
+    fi
+  fi
+
+  # Project ID required to list tasks:
+  # https://api.clockify.me/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks
+  curl -s -H "X-Api-Key: $CLOCKIFY_TOKEN" \
+    "https://api.clockify.me/api/v1/workspaces/$CLOCKIFY_WORKSPACE_ID/projects/$project_id/tasks"
+}
+
+get_task_names() {
+  local project_id="$1"
+  if [[ -z "$project_id" ]]; then
+    project_id=$(get_current_project_id)
+    if [[ -z "$project_id" ]]; then
+      return 1
+    fi
+  fi
+
+  local tasks_json=$(get_tasks "$project_id")
+  
+  if [[ "$tasks_json" == "[]" || -z "$tasks_json" ]]; then
+    return 0
+  fi
+
+  # Extract just the task names from the JSON response
+  echo "$tasks_json" | grep -o '"name":"[^"]*"' | cut -d'"' -f4
+}
+
 show_info() {
   # Check required parameters
   if [[ -z "$CLOCKIFY_TOKEN" || -z "$CLOCKIFY_WORKSPACE_ID" ]]; then
@@ -172,15 +230,23 @@ show_info() {
   fi
 
   # Show workspaces and projects (equivalent to -w)
-  echo "Workspaces and Projects:"
   workspaces=$(get_workspaces)
   projects=$(get_projects)
+  local current_project_id=$(get_current_project_id)
+  if [[ -n "$current_project_id" ]]; then
+    tasks=$(get_tasks "$current_project_id")
+  else
+    tasks="[]"
+  fi
 
+  echo "Workspace:"
   # Extract and display workspace info
   workspace_id=$(echo "$workspaces" | grep -o '"id":"'$CLOCKIFY_WORKSPACE_ID'"' | cut -d'"' -f4)
   workspace_name=$(echo "$workspaces" | sed -n 's/.*"id":"'$CLOCKIFY_WORKSPACE_ID'".*"name":"\([^"]*\)".*/\1/p')
   echo "$CLOCKIFY_WORKSPACE_ID $workspace_name"
 
+  echo ""
+  echo "Projects:"
   # Extract and display project info
   echo "$projects" | grep -o '"id":"[^"]*","name":"[^"]*"' | while read -r line; do
     project_id=$(echo "$line" | cut -d'"' -f4)
@@ -188,7 +254,41 @@ show_info() {
     echo "$project_id $project_name"
   done
 
+  # Extract and display task info
+  echo "$tasks" | grep -o '"id":"[^"]*","name":"[^"]*"' | while read -r line; do
+    task_id=$(echo "$line" | cut -d'"' -f4)
+    task_name=$(echo "$line" | cut -d'"' -f8)
+    echo "$task_id $task_name"
+  done
+
   echo ""
+
+  current_workspace="$workspace_name"
+  if [[ -z "$current_workspace" ]]; then
+    current_workspace="Unknown"
+  fi
+
+  # Show current project
+  if [[ -n "$current_project_id" ]]; then
+    current_project_name=$(echo "$projects" | grep -o '"id":"'$current_project_id'"[^}]*"name":"[^"]*"' | cut -d'"' -f8)
+    echo "Current Project: ${current_project_name:-$current_project_id}"
+    
+    # Show available tasks for current project
+    local task_names=$(get_task_names "$current_project_id")
+    if [[ -n "$task_names" ]]; then
+      echo ""
+      echo "Available Tasks:"
+      echo "$task_names" | while read -r task_name; do
+        if [[ -n "$task_name" ]]; then
+          echo "  - $task_name"
+        fi
+      done
+    else
+      echo "  No tasks found for this project"
+    fi
+  else
+    echo "Current Project: None"
+  fi
 
   # Show current time entry info (equivalent to -p)
   current_entries=$(get_current_time_entry)
@@ -398,12 +498,12 @@ if [[ $# -eq 2 && "$1" == "--task-name" ]]; then
   # Check if both timers are running
   pomodoro_running=false
   clockify_running=false
-  
+
   if is_pomodoro_running; then
     pomodoro_running=true
     echo "Pomodoro timer is running"
   fi
-  
+
   if is_clockify_running; then
     clockify_running=true
     echo "Clockify timer is running"
@@ -439,7 +539,7 @@ if [[ $# -eq 2 && "$1" == "--task-name" ]]; then
     echo "Resuming Pomodoro timer and starting Clockify timer with new task name..."
     if [[ -n "$CLOCKIFY_PROJECT_ID" ]]; then
       start_time_entry
-      sleep 1  # Give clockify time to start before pomodoro resumes
+      sleep 1 # Give clockify time to start before pomodoro resumes
       resume_pomodoro
       echo "Both timers resumed/started with new task name"
     else
@@ -449,7 +549,7 @@ if [[ $# -eq 2 && "$1" == "--task-name" ]]; then
   else
     echo "Use 'clockify start' to begin tracking with the new task name."
   fi
-  
+
   exit 0
 fi
 
@@ -491,6 +591,47 @@ info() {
   show_info
 }
 
+tasks() {
+  check_required CLOCKIFY_TOKEN CLOCKIFY_WORKSPACE_ID
+
+  local current_project_id=$(get_current_project_id)
+  if [[ -z "$current_project_id" ]]; then
+    echo "Error: No current project found. Either start a time entry or configure a project ID." >&2
+    return 1
+  fi
+
+  # Get project name to show which project we're listing tasks for
+  local projects=$(get_projects)
+  local project_name=$(echo "$projects" | sed -n 's/.*"id":"'$current_project_id'".*"name":"\([^"]*\)".*/\1/p')
+
+  echo "Tasks for project: ${project_name:-$current_project_id}"
+
+  local tasks_json=$(get_tasks "$current_project_id")
+
+  if [[ "$tasks_json" == "[]" || -z "$tasks_json" ]]; then
+    echo "No tasks found for this project"
+    return 0
+  fi
+
+  # Parse and display tasks
+  echo "$tasks_json" | grep -o '"id":"[^"]*","name":"[^"]*"' | while read -r line; do
+    task_id=$(echo "$line" | cut -d'"' -f4)
+    task_name=$(echo "$line" | cut -d'"' -f8)
+    echo "$task_id $task_name"
+  done
+}
+
+task() {
+  check_required CLOCKIFY_TOKEN CLOCKIFY_WORKSPACE_ID
+
+  # Source the clockify_tasks.sh script to access its functions
+  local script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  source "$script_dir/clockify_tasks.sh"
+
+  # Run the interactive task selection (which will save the config)
+  main
+}
+
 default() {
   check_required CLOCKIFY_TOKEN CLOCKIFY_WORKSPACE_ID
   stop_time_entry
@@ -505,6 +646,12 @@ case "$1" in
   ;;
 "info")
   info
+  ;;
+"tasks")
+  tasks
+  ;;
+"task")
+  task
   ;;
 *)
   default
