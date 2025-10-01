@@ -9,6 +9,7 @@ from typing import Optional
 
 from modules.config import ClockifyConfig
 from modules.api_client import ClockifyAPI, ClockifyAPIError
+from modules.client_manager import ClientManager
 from modules.project_manager import ProjectManager
 from modules.task_manager_new import TaskDescriptionManager
 from modules.time_tracker import TimeTracker
@@ -56,7 +57,16 @@ def create_parser() -> argparse.ArgumentParser:
     
     # Info command
     info_parser = subparsers.add_parser("info", help="Show current status")
-    
+
+    # Client commands
+    client_parser = subparsers.add_parser("client", help="Client management")
+    client_subparsers = client_parser.add_subparsers(dest="client_action")
+
+    client_list_parser = client_subparsers.add_parser("list", help="List all clients")
+    client_select_parser = client_subparsers.add_parser("select", help="Interactively select client")
+    client_set_parser = client_subparsers.add_parser("set", help="Set client by name")
+    client_set_parser.add_argument("name", help="Client name")
+
     # Project commands
     project_parser = subparsers.add_parser("project", help="Project management")
     project_subparsers = project_parser.add_subparsers(dest="project_action")
@@ -130,11 +140,12 @@ def setup_components(args) -> tuple:
     # Initialize components
     try:
         api = ClockifyAPI(config.token, config.workspace_id)
+        client_manager = ClientManager(api, config)
         project_manager = ProjectManager(api, config)
         task_manager = TaskDescriptionManager(api, config, project_manager)
         time_tracker = TimeTracker(api, config, project_manager)
-        
-        return config, api, project_manager, task_manager, time_tracker
+
+        return config, api, client_manager, project_manager, task_manager, time_tracker
     
     except ClockifyAPIError as e:
         print(f"Error initializing Clockify API: {e}")
@@ -164,6 +175,34 @@ def handle_time_commands(args, time_tracker: TimeTracker) -> None:
                 print(f"Error skipping Pomodoro: {e}")
         
         success = time_tracker.stop_tracking()
+        if not success:
+            sys.exit(1)
+
+
+def handle_client_commands(args, client_manager: ClientManager) -> None:
+    """Handle client management commands."""
+    if not args.client_action:
+        # Default to interactive selection
+        result = client_manager.select_client_interactive()
+        if result:
+            client_id, client_name = result
+            client_manager.set_current_client(client_id)
+        else:
+            print("Client selection cancelled")
+
+    elif args.client_action == "list":
+        client_manager.list_clients()
+
+    elif args.client_action == "select":
+        result = client_manager.select_client_interactive()
+        if result:
+            client_id, client_name = result
+            client_manager.set_current_client(client_id)
+        else:
+            print("Client selection cancelled")
+
+    elif args.client_action == "set":
+        success = client_manager.set_current_client_by_name(args.name)
         if not success:
             sys.exit(1)
 
@@ -293,11 +332,11 @@ def main():
     
     # Handle --description only (backward compatibility with --task-name)
     description_arg = args.description or args.task_name
-    if (not args.command and description_arg and 
-        ((len(sys.argv) == 3 and sys.argv[1] == "--description") or 
+    if (not args.command and description_arg and
+        ((len(sys.argv) == 3 and sys.argv[1] == "--description") or
          (len(sys.argv) == 3 and sys.argv[1] == "--task-name"))):
         try:
-            config, api, project_manager, task_manager, time_tracker = setup_components(args)
+            config, api, client_manager, project_manager, task_manager, time_tracker = setup_components(args)
             time_tracker.change_description(description_arg)
             return
         except SystemExit:
@@ -306,9 +345,9 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
     # Setup components
-    config, api, project_manager, task_manager, time_tracker = setup_components(args)
+    config, api, client_manager, project_manager, task_manager, time_tracker = setup_components(args)
     
     # Handle commands
     if args.command in ["start", "resume", "stop", "pause", "complete", "skip"]:
@@ -316,7 +355,10 @@ def main():
     
     elif args.command == "info":
         time_tracker.show_info()
-    
+
+    elif args.command == "client":
+        handle_client_commands(args, client_manager)
+
     elif args.command == "project":
         handle_project_commands(args, project_manager)
     

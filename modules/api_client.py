@@ -47,6 +47,10 @@ class ClockifyAPI:
         """Get all workspaces."""
         return self._make_request("GET", "workspaces")
     
+    def get_clients(self) -> List[Dict[str, Any]]:
+        """Get all clients in the workspace."""
+        return self._make_request("GET", f"workspaces/{self.workspace_id}/clients")
+
     def get_projects(self) -> List[Dict[str, Any]]:
         """Get all projects in the workspace."""
         return self._make_request("GET", f"workspaces/{self.workspace_id}/projects")

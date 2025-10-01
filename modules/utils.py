@@ -64,29 +64,34 @@ def get_user_selection(items: list, prompt: str = "Select an item", current_item
     if not items:
         print("No items to select from.")
         return None
-    
+
+    # Auto-select if there's only one option
+    if len(items) == 1:
+        print(f"\nAuto-selected: {items[0]}")
+        return 0
+
     print(f"\n{prompt}:\n")
-    
+
     for i, item in enumerate(items, 1):
         marker = " (current)" if current_item and item == current_item else ""
         print(f"{i:2d}. {item}{marker}")
-    
+
     print()
-    
+
     while True:
         try:
             selection = input(f"Select an item (1-{len(items)}): ").strip()
-            
+
             if not selection:
                 continue
-                
+
             index = int(selection) - 1
-            
+
             if 0 <= index < len(items):
                 return index
             else:
                 print(f"Invalid selection. Please enter a number between 1 and {len(items)}.")
-        
+
         except ValueError:
             print("Please enter a valid number.")
         except KeyboardInterrupt:

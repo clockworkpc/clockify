@@ -92,7 +92,17 @@ class ClockifyConfig:
     def workspace_id(self, value: str) -> None:
         """Set workspace ID."""
         self.set("workspace_id", value)
-    
+
+    @property
+    def client_id(self) -> Optional[str]:
+        """Get client ID."""
+        return self.get("client_id")
+
+    @client_id.setter
+    def client_id(self, value: str) -> None:
+        """Set client ID."""
+        self.set("client_id", value)
+
     @property
     def project_id(self) -> Optional[str]:
         """Get project ID."""
