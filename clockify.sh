@@ -164,7 +164,13 @@ get_projects() {
 }
 
 get_current_project_id() {
-  # Try to get project ID from active time entry first
+  # Try configured project ID first
+  if [[ -n "$CLOCKIFY_PROJECT_ID" ]]; then
+    echo "$CLOCKIFY_PROJECT_ID"
+    return 0
+  fi
+
+  # Fall back to project ID from active time entry
   local current_entry=$(get_current_time_entry)
   if [[ "$current_entry" != "[]" && -n "$current_entry" ]]; then
     local project_id=$(echo "$current_entry" | jq -r '.[0].projectId // empty' 2>/dev/null)
@@ -175,12 +181,6 @@ get_current_project_id() {
       echo "$project_id"
       return 0
     fi
-  fi
-
-  # Fall back to configured project ID
-  if [[ -n "$CLOCKIFY_PROJECT_ID" ]]; then
-    echo "$CLOCKIFY_PROJECT_ID"
-    return 0
   fi
 
   return 1

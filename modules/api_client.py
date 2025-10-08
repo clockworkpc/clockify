@@ -26,10 +26,15 @@ class ClockifyAPI:
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Any:
         """Make HTTP request to Clockify API."""
         url = f"{self.base_url}/{endpoint}"
-        
+
         try:
             response = requests.request(method, url, headers=self.headers, json=data)
             response.raise_for_status()
+
+            # DELETE requests often return empty content
+            if response.status_code == 204 or not response.content:
+                return None
+
             return response.json()
         except requests.exceptions.RequestException as e:
             raise ClockifyAPIError(f"API request failed: {e}")
@@ -100,6 +105,15 @@ class ClockifyAPI:
         """Delete a task from a project."""
         try:
             self._make_request("DELETE", f"workspaces/{self.workspace_id}/projects/{project_id}/tasks/{task_id}")
+            return True
+        except ClockifyAPIError:
+            return False
+
+    def delete_time_entry(self, entry_id: str) -> bool:
+        """Delete a time entry."""
+        try:
+            self._make_request("DELETE", f"workspaces/{self.workspace_id}/time-entries/{entry_id}")
+            # If no exception was raised, deletion was successful
             return True
         except ClockifyAPIError:
             return False

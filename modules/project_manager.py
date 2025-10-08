@@ -40,20 +40,20 @@ class ProjectManager:
         return None
     
     def get_current_project(self) -> Optional[dict]:
-        """Get the current project from active time entry or config."""
-        # First, try to get from active time entry
+        """Get the current project from config or active time entry."""
+        # First, try to get from configured project
+        if self.config.project_id:
+            project = self.find_project_by_id(self.config.project_id)
+            if project:
+                return project
+
+        # Fall back to active time entry
         current_entry = self.api.get_current_time_entry()
         if current_entry and current_entry.get("projectId"):
             project = self.find_project_by_id(current_entry["projectId"])
             if project:
                 return project
-        
-        # Fall back to configured project
-        if self.config.project_id:
-            project = self.find_project_by_id(self.config.project_id)
-            if project:
-                return project
-        
+
         return None
     
     def get_current_project_name(self) -> Optional[str]:
