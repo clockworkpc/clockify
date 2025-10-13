@@ -202,17 +202,29 @@ class TaskDescriptionManager:
         
         return (task_id, task_name, description)
     
-    def set_current_task_and_description(self, task_id: str, task_name: str, description: str, 
+    def set_current_task_and_description(self, task_id: Optional[str], task_name: Optional[str], description: str,
                                        project_id: Optional[str] = None, stop_timer: bool = True) -> None:
         """Set the current task and description in configuration.
-        
+
         Args:
-            task_id: The formal task ID
-            task_name: The task name (for display)
+            task_id: The formal task ID (None for description-only entries)
+            task_name: The task name (for display, None for description-only entries)
             description: The time entry description
             project_id: Optional project ID to switch to
             stop_timer: Whether to stop the current timer when switching
         """
+        # Save current task state as previous task before switching
+        # Only save if there is a current task set
+        if self.config.task_id or self.config.task_name or self.config.description:
+            previous_state = {
+                "client_id": self.config.client_id,
+                "project_id": self.config.project_id,
+                "task_id": self.config.task_id,
+                "task_name": self.config.task_name,
+                "description": self.config.description
+            }
+            self.config.previous_task = previous_state
+
         # Stop current timer and pause Pomodoro if requested
         if stop_timer:
             try:
@@ -263,8 +275,11 @@ class TaskDescriptionManager:
         self.config.task_id = task_id
         self.config.task_name = task_name
         self.config.description = description
-        
-        print(f"Task set to: {task_name}")
+
+        if task_name:
+            print(f"Task set to: {task_name}")
+        else:
+            print("Task cleared (description-only entry)")
         print(f"Description set to: {description}")
         
         # Resume tracking if it was active before the switch
@@ -279,20 +294,22 @@ class TaskDescriptionManager:
                 
                 was_clockify_running = getattr(self, '_was_clockify_running', False)
                 was_pomodoro_running = getattr(self, '_was_pomodoro_running', False)
-                
+
                 print("Resuming tracking with new task/description...")
-                
+
+                # Resume Pomodoro timer FIRST if it was running
+                # This must happen before starting Clockify because start_tracking()
+                # checks the Pomodoro state and will refuse to start if not in work state
+                if was_pomodoro_running and pomodoro.is_available():
+                    print("Resuming Pomodoro timer...")
+                    pomodoro.resume()
+
                 # Start Clockify timer if it was running or if Pomodoro was running
                 clockify_started = False
                 if was_clockify_running or was_pomodoro_running:
                     clockify_started = time_tracker.start_tracking()
                     if not clockify_started:
                         print("Failed to restart Clockify timer")
-                
-                # Resume Pomodoro timer if it was running
-                if was_pomodoro_running and pomodoro.is_available():
-                    print("Resuming Pomodoro timer...")
-                    pomodoro.resume()
                 
                 # Status message
                 if clockify_started and was_pomodoro_running:
@@ -429,3 +446,74 @@ class TaskDescriptionManager:
             "task_name": self.config.task_name,
             "description": self.config.description
         }
+
+    def switch_to_previous_task(self) -> bool:
+        """Switch back to the previously selected task (like 'cd -' or 'git checkout -').
+
+        Returns:
+            True if successfully switched, False otherwise
+        """
+        previous_task = self.config.previous_task
+
+        if not previous_task:
+            print("No previous task found.")
+            print("Set a task first to create a history.")
+            return False
+
+        # Extract previous task details
+        prev_client_id = previous_task.get("client_id")
+        prev_project_id = previous_task.get("project_id")
+        prev_task_id = previous_task.get("task_id")
+        prev_task_name = previous_task.get("task_name")
+        prev_description = previous_task.get("description")
+
+        # Validate that we have at least task information
+        if not prev_task_id and not prev_task_name and not prev_description:
+            print("Previous task state is incomplete.")
+            return False
+
+        print(f"Switching back to previous task...")
+        print(f"  Client: {prev_client_id or '(not set)'}")
+        print(f"  Project: {prev_project_id or '(not set)'}")
+        print(f"  Task: {prev_task_name or '(not set)'}")
+        print(f"  Description: {prev_description or '(not set)'}")
+        print()
+
+        # Update client if it exists in the previous state
+        if prev_client_id and prev_client_id != self.config.client_id:
+            self.config.client_id = prev_client_id
+
+        # Update project if it exists in the previous state
+        if prev_project_id and prev_project_id != self.config.project_id:
+            # Validate the project still exists
+            project = self.project_manager.find_project_by_id(prev_project_id)
+            if project:
+                self.config.project_id = prev_project_id
+            else:
+                print(f"Warning: Previous project (ID: {prev_project_id}) no longer exists")
+
+        # Switch to the previous task (at minimum we need a description)
+        if prev_description:
+            # Validate that the task still exists before switching (if task_id is present)
+            if prev_project_id and prev_task_id:
+                try:
+                    tasks = self.api.get_project_tasks(prev_project_id)
+                    task_exists = any(task['id'] == prev_task_id for task in tasks)
+                    if not task_exists:
+                        print(f"Warning: Previous task '{prev_task_name}' no longer exists in the project")
+                        print("Switching to description only (without formal task)...")
+                        prev_task_id = None
+                        prev_task_name = None
+                except Exception as e:
+                    print(f"Warning: Could not validate previous task: {e}")
+
+            self.set_current_task_and_description(
+                prev_task_id,
+                prev_task_name,
+                prev_description,
+                prev_project_id
+            )
+            return True
+        else:
+            print("Error: Previous task information is incomplete (no description)")
+            return False

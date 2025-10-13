@@ -159,7 +159,21 @@ class ClockifyConfig:
             self._state.pop("current_entry_id", None)
         else:
             self.set_state("current_entry_id", value)
-    
+
+    @property
+    def previous_task(self) -> Optional[Dict[str, Optional[str]]]:
+        """Get previous task state (client_id, project_id, task_id, task_name, description)."""
+        return self.get("previous_task")
+
+    @previous_task.setter
+    def previous_task(self, value: Optional[Dict[str, Optional[str]]]) -> None:
+        """Set previous task state."""
+        if value is None:
+            self._config.pop("previous_task", None)
+            self.save_config()
+        else:
+            self.set("previous_task", value)
+
     def is_configured(self) -> bool:
         """Check if basic configuration is present."""
         return bool(self.token and self.workspace_id)

@@ -94,7 +94,10 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Project-Task combined command
     project_task_parser = subparsers.add_parser("project-task", help="Select project and task (auto-updates client)")
-    
+
+    # Switch command - switch back to previous task
+    switch_parser = subparsers.add_parser("switch", help="Switch back to previous task (like 'cd -' or 'git checkout -')")
+
     # Legacy command aliases for compatibility
     tasks_parser = subparsers.add_parser("tasks", help="List tasks (legacy alias)")
     projects_parser = subparsers.add_parser("projects", help="List projects (legacy alias)")
@@ -408,6 +411,11 @@ def main():
 
     elif args.command == "project-task":
         handle_project_task_commands(project_manager, task_manager, client_manager)
+
+    elif args.command == "switch":
+        success = task_manager.switch_to_previous_task()
+        if not success:
+            sys.exit(1)
 
     elif args.command == "pomodoro":
         handle_pomodoro_commands(args, time_tracker)

@@ -59,7 +59,23 @@ class TimeTracker:
         if task_id:
             self.config.task_id = task_id
         # task_id is optional - can be None for entries without formal tasks
-        
+
+        # Validate that task_id belongs to project_id if task_id is provided
+        if self.config.task_id:
+            try:
+                tasks = self.api.get_project_tasks(self.config.project_id)
+                task_exists = any(task['id'] == self.config.task_id for task in tasks)
+                if not task_exists:
+                    print(f"Warning: Task ID {self.config.task_id} does not exist in project {self.config.project_id}")
+                    print(f"         Task name: {self.config.task_name}")
+                    print("This task may have been deleted or moved to another project.")
+                    print("Starting time entry without a formal task...")
+                    self.config.task_id = None
+                    self.config.task_name = None
+            except ClockifyAPIError as e:
+                print(f"Warning: Could not validate task: {e}")
+                print("Continuing with the provided task ID...")
+
         # For Pomodoro integration: only start if not in break state
         if self.pomodoro.is_available():
             current_state = self.pomodoro.get_current_state()

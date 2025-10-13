@@ -85,6 +85,13 @@ class ClockifyAPI:
         }
         if task_id:
             data["taskId"] = task_id
+
+        # Debug logging
+        print(f"DEBUG: Starting time entry with:")
+        print(f"  description: {description}")
+        print(f"  projectId: {project_id}")
+        print(f"  taskId: {task_id}")
+
         return self._make_request("POST", f"workspaces/{self.workspace_id}/time-entries", data)
     
     def stop_time_entry(self) -> Dict[str, Any]:
