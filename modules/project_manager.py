@@ -74,25 +74,90 @@ class ProjectManager:
     
     def select_project_interactive(self) -> Optional[Tuple[str, str]]:
         """Interactively select a project."""
-        projects = self.get_projects()
-        if not projects:
-            print("No projects found")
-            return None
-        
-        project_names = [project["name"] for project in projects]
-        current_project_name = self.get_current_project_name()
-        
-        selection_index = get_user_selection(
-            project_names, 
-            "Available Projects",
-            current_project_name
-        )
-        
-        if selection_index is not None:
-            selected_project = projects[selection_index]
-            return selected_project["id"], selected_project["name"]
-        
-        return None
+        while True:
+            projects = self.get_projects()
+            if not projects:
+                print("No projects found")
+                return None
+
+            # Filter projects by current client if one is set
+            if self.config.client_id:
+                filtered_projects = [
+                    project for project in projects
+                    if project.get("clientId") == self.config.client_id
+                ]
+
+                if not filtered_projects:
+                    from .client_manager import ClientManager
+                    client_manager = ClientManager(self.api, self.config)
+                    current_client = client_manager.get_current_client()
+                    client_name = current_client["name"] if current_client else self.config.client_id
+                    print(f"No projects found for client: {client_name}")
+                    return None
+
+                projects = filtered_projects
+
+            project_names = [project["name"] for project in projects]
+            current_project_name = self.get_current_project_name()
+
+            # Display current client if set
+            if self.config.client_id:
+                from .client_manager import ClientManager
+                client_manager = ClientManager(self.api, self.config)
+                current_client = client_manager.get_current_client()
+                if current_client:
+                    print(f"\nCurrent Client: {current_client['name']}")
+
+            # Display projects with option 0 to select client
+            print("\nAvailable Projects:\n")
+            print(" 0. [Select Client]")
+            for i, project_name in enumerate(project_names, 1):
+                marker = " (current)" if current_project_name and project_name == current_project_name else ""
+                print(f"{i:2d}. {project_name}{marker}")
+            print()
+
+            # Get user input
+            try:
+                selection = input(f"Select an item (0-{len(project_names)}): ").strip()
+
+                if not selection:
+                    # If there's a current project, auto-select it
+                    if current_project_name and current_project_name in project_names:
+                        index = project_names.index(current_project_name)
+                        selected_project = projects[index]
+                        print(f"Auto-selecting current project: {current_project_name}")
+                        return selected_project["id"], selected_project["name"]
+                    continue
+
+                # Handle "0" to open client selection
+                if selection == "0":
+                    from .client_manager import ClientManager
+                    client_manager = ClientManager(self.api, self.config)
+                    result = client_manager.select_client_interactive()
+                    if result:
+                        client_id, client_name = result
+                        client_manager.set_current_client(client_id)
+                        print()
+                        # Loop back to project selection
+                        continue
+                    else:
+                        # Client selection cancelled, return to project selection
+                        continue
+
+                # Handle regular project selection
+                index = int(selection) - 1
+
+                if 0 <= index < len(project_names):
+                    selected_project = projects[index]
+                    return selected_project["id"], selected_project["name"]
+                else:
+                    print(f"Invalid selection. Please enter a number between 0 and {len(project_names)}.")
+
+            except ValueError:
+                print("Please enter a valid number.")
+            except KeyboardInterrupt:
+                print("\nSelection cancelled.")
+                return None
     
     def set_current_project(self, project_id: str) -> bool:
         """Set the current project in configuration."""

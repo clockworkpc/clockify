@@ -79,7 +79,7 @@ def create_parser() -> argparse.ArgumentParser:
     # Task commands
     task_parser = subparsers.add_parser("task", help="Task management")
     task_subparsers = task_parser.add_subparsers(dest="task_action")
-    
+
     task_list_parser = task_subparsers.add_parser("list", help="List all tasks")
     task_list_parser.add_argument("--limit", type=int, default=50, help="Limit for history entries")
     task_list_parser.add_argument("--all-projects", action="store_true", help="Show tasks from all projects")
@@ -91,6 +91,9 @@ def create_parser() -> argparse.ArgumentParser:
     task_create_parser.add_argument("name", help="Task name")
     task_delete_parser = task_subparsers.add_parser("delete", help="Delete a formal task")
     task_delete_parser.add_argument("name", help="Task name")
+
+    # Project-Task combined command
+    project_task_parser = subparsers.add_parser("project-task", help="Select project and task (auto-updates client)")
     
     # Legacy command aliases for compatibility
     tasks_parser = subparsers.add_parser("tasks", help="List tasks (legacy alias)")
@@ -281,42 +284,80 @@ def handle_task_commands(args, task_manager: TaskDescriptionManager) -> None:
 def handle_pomodoro_commands(args, time_tracker: TimeTracker) -> None:
     """Handle Pomodoro timer commands."""
     pomodoro = PomodoroIntegration()
-    
+
     if not pomodoro.is_available():
         print("Pomodoro integration not available")
         return
-    
+
     try:
         if args.pomodoro_action == "start":
             pomodoro.start()
             print("Pomodoro started")
-        
+
         elif args.pomodoro_action == "stop":
             pomodoro.stop()
             print("Pomodoro stopped")
-        
+
         elif args.pomodoro_action == "pause":
             pomodoro.pause()
             print("Pomodoro paused")
-        
+
         elif args.pomodoro_action == "resume":
             pomodoro.resume()
             print("Pomodoro resumed")
-        
+
         elif args.pomodoro_action == "skip":
             pomodoro.skip()
             print("Pomodoro session skipped")
-        
+
         elif args.pomodoro_action == "status":
             state = pomodoro.get_current_state()
             print(f"Pomodoro state: {state or 'Unknown'}")
-        
+
         elif args.pomodoro_action == "sync":
             time_tracker.sync_with_pomodoro()
-    
+
     except PomodoroError as e:
         print(f"Pomodoro error: {e}")
         sys.exit(1)
+
+
+def handle_project_task_commands(project_manager: ProjectManager,
+                                 task_manager: TaskDescriptionManager,
+                                 client_manager: ClientManager) -> None:
+    """Handle combined project-task selection with automatic client update."""
+    # Step 1: Select project
+    result = project_manager.select_project_interactive()
+    if not result:
+        print("Project selection cancelled")
+        return
+
+    project_id, project_name = result
+
+    # Step 2: Check if project has a different client and update if needed
+    project = project_manager.find_project_by_id(project_id)
+    if project and project.get("clientId"):
+        current_client_id = client_manager.config.client_id
+        project_client_id = project["clientId"]
+
+        # If the project belongs to a different client, update the client
+        if current_client_id != project_client_id:
+            client = client_manager.find_client_by_id(project_client_id)
+            if client:
+                client_manager.config.client_id = project_client_id
+                print(f"Client automatically updated to: {client['name']}")
+
+    # Step 3: Set the project
+    project_manager.set_current_project(project_id)
+    print()
+
+    # Step 4: Select task
+    result = task_manager.select_task_and_description_interactive()
+    if result:
+        task_id, task_name, description = result
+        task_manager.set_current_task_and_description(task_id, task_name, description)
+    else:
+        print("Task/description selection cancelled")
 
 
 def main():
@@ -364,14 +405,17 @@ def main():
     
     elif args.command == "task":
         handle_task_commands(args, task_manager)
-    
+
+    elif args.command == "project-task":
+        handle_project_task_commands(project_manager, task_manager, client_manager)
+
     elif args.command == "pomodoro":
         handle_pomodoro_commands(args, time_tracker)
-    
+
     # Legacy aliases
     elif args.command == "tasks":
         task_manager.list_tasks()
-    
+
     elif args.command == "projects":
         project_manager.list_projects()
     

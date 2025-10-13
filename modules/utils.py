@@ -59,8 +59,14 @@ def show_notification(message: str) -> None:
             print(f"Notification: {message}")
 
 
-def get_user_selection(items: list, prompt: str = "Select an item", current_item: str = None) -> Optional[int]:
-    """Interactive user selection from a list of items."""
+def get_user_selection(items: list, prompt: str = "Select an item", current_item: str = None) -> Optional[tuple]:
+    """Interactive user selection from a list of items.
+
+    Returns:
+        Tuple of (index, user_input) where user_input is the text entered by the user
+        when auto-selecting the "Enter new" option, or None otherwise.
+        Returns None if selection is cancelled.
+    """
     if not items:
         print("No items to select from.")
         return None
@@ -68,7 +74,7 @@ def get_user_selection(items: list, prompt: str = "Select an item", current_item
     # Auto-select if there's only one option
     if len(items) == 1:
         print(f"\nAuto-selected: {items[0]}")
-        return 0
+        return (0, None)
 
     print(f"\n{prompt}:\n")
 
@@ -83,16 +89,42 @@ def get_user_selection(items: list, prompt: str = "Select an item", current_item
             selection = input(f"Select an item (1-{len(items)}): ").strip()
 
             if not selection:
+                # If there's a current item, auto-select it
+                if current_item and current_item in items:
+                    index = items.index(current_item)
+                    print(f"Auto-selecting current: {current_item}")
+                    return (index, None)
                 continue
+
+            # Handle "None" input to select current item
+            if selection.lower() == "none" and current_item:
+                # Find the index of the current item
+                try:
+                    index = items.index(current_item)
+                    print(f"Auto-selecting current: {current_item}")
+                    return (index, None)
+                except ValueError:
+                    print(f"Current item '{current_item}' not found in list.")
+                    continue
 
             index = int(selection) - 1
 
             if 0 <= index < len(items):
-                return index
+                return (index, None)
             else:
                 print(f"Invalid selection. Please enter a number between 1 and {len(items)}.")
 
         except ValueError:
+            # Check if user entered a descriptive string (> 5 chars)
+            # and last item is an "Enter new" or "Create new" option
+            if len(selection) > 5 and len(items) > 0:
+                last_item = items[-1].lower()
+                if "[enter new" in last_item or "[create new" in last_item:
+                    # Auto-select the last option and pass the user's input
+                    print(f"Auto-selecting: {items[-1]}")
+                    print(f"Using: {selection}")
+                    return (len(items) - 1, selection)
+
             print("Please enter a valid number.")
         except KeyboardInterrupt:
             print("\nSelection cancelled.")

@@ -193,12 +193,17 @@ class TaskManager:
                     break
         
         title = f"Tasks {'from all projects' if all_projects else 'for project: ' + current_project['name']}"
-        selection_index = get_user_selection(display_options, title, current_task_display)
-        
-        if selection_index is not None:
+        result = get_user_selection(display_options, title, current_task_display)
+
+        if result is not None:
+            selection_index, user_input = result
             # If "Create new task" was selected
             if selection_index == len(task_suggestions):
-                new_task = self._create_new_task_interactive(current_project)
+                # If user provided input via auto-select, use it
+                if user_input:
+                    new_task = user_input
+                else:
+                    new_task = self._create_new_task_interactive(current_project)
                 if new_task:
                     return (new_task, current_project["id"], False)
                 return None

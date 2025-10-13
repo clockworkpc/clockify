@@ -73,13 +73,14 @@ class ClientManager:
         client_names = [client["name"] for client in clients]
         current_client_name = self.get_current_client_name()
 
-        selection_index = get_user_selection(
+        result = get_user_selection(
             client_names,
             "Available Clients",
             current_client_name
         )
 
-        if selection_index is not None:
+        if result is not None:
+            selection_index, _ = result
             selected_client = clients[selection_index]
             return selected_client["id"], selected_client["name"]
 

@@ -54,20 +54,25 @@ class TaskDescriptionManager:
                     current_task_name = task["name"]
                     break
         
-        selection_index = get_user_selection(
+        result = get_user_selection(
             task_names,
             f"Formal tasks for project: {current_project['name']}",
             current_task_name
         )
-        
-        if selection_index is not None:
+
+        if result is not None:
+            selection_index, user_input = result
             # If "Create new task" was selected
             if selection_index == len(formal_tasks):
-                return self._create_new_task_interactive(current_project)
+                # If user provided input via auto-select, use it
+                if user_input:
+                    return self._create_new_task_with_name(current_project, user_input)
+                else:
+                    return self._create_new_task_interactive(current_project)
             else:
                 selected_task = formal_tasks[selection_index]
                 return (selected_task["id"], selected_task["name"], current_project["id"])
-        
+
         return None
     
     def select_description_interactive(self, task_id: str, task_name: str, project_id: str) -> Optional[str]:
@@ -85,20 +90,25 @@ class TaskDescriptionManager:
         
         # Find current description for highlighting
         current_description = self.config.description
-        
-        selection_index = get_user_selection(
+
+        result = get_user_selection(
             options,
             f"Descriptions for task: {task_name}",
             current_description
         )
-        
-        if selection_index is not None:
+
+        if result is not None:
+            selection_index, user_input = result
             # If "Enter new description" was selected
             if selection_index == len(existing_descriptions):
-                return self._create_new_description_interactive(task_name)
+                # If user provided input via auto-select, use it directly
+                if user_input:
+                    return user_input
+                else:
+                    return self._create_new_description_interactive(task_name)
             else:
                 return existing_descriptions[selection_index]
-        
+
         return None
     
     def _create_new_description_interactive(self, task_name: str) -> Optional[str]:
@@ -113,9 +123,35 @@ class TaskDescriptionManager:
             print("\nDescription creation cancelled.")
             return None
 
+    def _create_new_task_with_name(self, current_project: Dict, task_name: str) -> Optional[Tuple[str, str, str]]:
+        """Create a new task with a provided name.
+
+        Returns:
+            Tuple of (task_id, task_name, project_id) or None if failed
+        """
+        if not task_name or not task_name.strip():
+            print("Task name cannot be empty.")
+            return None
+
+        task_name = task_name.strip()
+
+        # Create the task using the existing create_formal_task method
+        success = self.create_formal_task(task_name)
+        if not success:
+            return None
+
+        # Find the newly created task to return its details
+        formal_tasks = self.get_formal_tasks_for_project(current_project["id"])
+        for task in formal_tasks:
+            if task["name"] == task_name:
+                return (task["id"], task["name"], current_project["id"])
+
+        print("Error: Could not find the newly created task")
+        return None
+
     def _create_new_task_interactive(self, current_project: Dict) -> Optional[Tuple[str, str, str]]:
         """Interactive new task creation.
-        
+
         Returns:
             Tuple of (task_id, task_name, project_id) or None if cancelled/failed
         """
@@ -124,21 +160,21 @@ class TaskDescriptionManager:
             if not task_name:
                 print("Task name cannot be empty.")
                 return None
-                
+
             # Create the task using the existing create_formal_task method
             success = self.create_formal_task(task_name)
             if not success:
                 return None
-                
+
             # Find the newly created task to return its details
             formal_tasks = self.get_formal_tasks_for_project(current_project["id"])
             for task in formal_tasks:
                 if task["name"] == task_name:
                     return (task["id"], task["name"], current_project["id"])
-            
+
             print("Error: Could not find the newly created task")
             return None
-            
+
         except KeyboardInterrupt:
             print("\nTask creation cancelled.")
             return None
