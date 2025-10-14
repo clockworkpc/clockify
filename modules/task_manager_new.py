@@ -203,7 +203,8 @@ class TaskDescriptionManager:
         return (task_id, task_name, description)
     
     def set_current_task_and_description(self, task_id: Optional[str], task_name: Optional[str], description: str,
-                                       project_id: Optional[str] = None, stop_timer: bool = True) -> None:
+                                       project_id: Optional[str] = None, client_id: Optional[str] = None,
+                                       stop_timer: bool = True, save_previous_state: bool = True) -> None:
         """Set the current task and description in configuration.
 
         Args:
@@ -211,11 +212,13 @@ class TaskDescriptionManager:
             task_name: The task name (for display, None for description-only entries)
             description: The time entry description
             project_id: Optional project ID to switch to
+            client_id: Optional client ID to switch to
             stop_timer: Whether to stop the current timer when switching
+            save_previous_state: Whether to save current state as previous (False when called from switch)
         """
         # Save current task state as previous task before switching
-        # Only save if there is a current task set
-        if self.config.task_id or self.config.task_name or self.config.description:
+        # Only save if there is a current task set AND we're not being called from switch
+        if save_previous_state and (self.config.task_id or self.config.task_name or self.config.description):
             previous_state = {
                 "client_id": self.config.client_id,
                 "project_id": self.config.project_id,
@@ -261,7 +264,12 @@ class TaskDescriptionManager:
             except Exception as e:
                 print(f"Warning: Could not stop current timer: {e}")
                 self._should_resume_tracking = False
-        
+
+        # Update client if provided
+        if client_id and client_id != self.config.client_id:
+            self.config.client_id = client_id
+            # Note: We don't resolve client name here to keep this method lightweight
+
         # Update project if provided
         if project_id and project_id != self.config.project_id:
             # Find project name for display
@@ -460,7 +468,64 @@ class TaskDescriptionManager:
             print("Set a task first to create a history.")
             return False
 
-        # Extract previous task details
+        # Get CURRENT state from API (source of truth), not from config file
+        # The config file might be stale or incorrect
+        current_entry = self.api.get_current_time_entry()
+
+        if current_entry:
+            # Extract current state from running time entry
+            current_description = current_entry.get("description")
+            current_project_id = current_entry.get("projectId")
+            current_task_id = current_entry.get("taskId")
+
+            # Get task name if task_id exists
+            current_task_name = None
+            if current_task_id and current_project_id:
+                try:
+                    tasks = self.api.get_project_tasks(current_project_id)
+                    for task in tasks:
+                        if task["id"] == current_task_id:
+                            current_task_name = task["name"]
+                            break
+                except Exception:
+                    pass
+
+            # Get client_id from project
+            current_client_id = None
+            if current_project_id:
+                project = self.project_manager.find_project_by_id(current_project_id)
+                if project:
+                    current_client_id = project.get("clientId")
+
+            # Save current API state as previous_task for future switches
+            current_state = {
+                "client_id": current_client_id,
+                "project_id": current_project_id,
+                "task_id": current_task_id,
+                "task_name": current_task_name,
+                "description": current_description
+            }
+            self.config.previous_task = current_state
+
+            print("Current state captured from running time entry (source of truth)")
+        else:
+            # No timer running - use config but warn user it might be stale
+            print("Warning: No timer currently running")
+            print("Using last known state from config (might be stale)")
+            print()
+
+            # Save current config state for next switch
+            if self.config.task_id or self.config.task_name or self.config.description:
+                current_state = {
+                    "client_id": self.config.client_id,
+                    "project_id": self.config.project_id,
+                    "task_id": self.config.task_id,
+                    "task_name": self.config.task_name,
+                    "description": self.config.description
+                }
+                self.config.previous_task = current_state
+
+        # Extract previous task details (the task we're switching TO)
         prev_client_id = previous_task.get("client_id")
         prev_project_id = previous_task.get("project_id")
         prev_task_id = previous_task.get("task_id")
@@ -479,18 +544,12 @@ class TaskDescriptionManager:
         print(f"  Description: {prev_description or '(not set)'}")
         print()
 
-        # Update client if it exists in the previous state
-        if prev_client_id and prev_client_id != self.config.client_id:
-            self.config.client_id = prev_client_id
-
-        # Update project if it exists in the previous state
-        if prev_project_id and prev_project_id != self.config.project_id:
-            # Validate the project still exists
+        # Validate that the project still exists (if specified)
+        if prev_project_id:
             project = self.project_manager.find_project_by_id(prev_project_id)
-            if project:
-                self.config.project_id = prev_project_id
-            else:
-                print(f"Warning: Previous project (ID: {prev_project_id}) no longer exists")
+            if not project:
+                print(f"Error: Previous project (ID: {prev_project_id}) no longer exists")
+                return False
 
         # Switch to the previous task (at minimum we need a description)
         if prev_description:
@@ -511,7 +570,9 @@ class TaskDescriptionManager:
                 prev_task_id,
                 prev_task_name,
                 prev_description,
-                prev_project_id
+                prev_project_id,
+                prev_client_id,
+                save_previous_state=False  # Already saved above from API
             )
             return True
         else:
