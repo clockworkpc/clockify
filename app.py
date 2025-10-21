@@ -9,6 +9,7 @@ from typing import Optional
 
 from modules.config import ClockifyConfig
 from modules.api_client import ClockifyAPI, ClockifyAPIError
+from modules.data_cache import DataCache
 from modules.client_manager import ClientManager
 from modules.project_manager import ProjectManager
 from modules.task_manager_new import TaskDescriptionManager
@@ -146,13 +147,18 @@ def setup_components(args) -> tuple:
     # Initialize components
     try:
         api = ClockifyAPI(config.token, config.workspace_id)
-        client_manager = ClientManager(api, config)
-        project_manager = ProjectManager(api, config)
-        task_manager = TaskDescriptionManager(api, config, project_manager)
+
+        # Initialize cache and load all data at startup
+        cache = DataCache(api)
+        cache.load_all(time_entries_limit=100)
+
+        client_manager = ClientManager(api, config, cache)
+        project_manager = ProjectManager(api, config, cache)
+        task_manager = TaskDescriptionManager(api, config, project_manager, cache)
         time_tracker = TimeTracker(api, config, project_manager)
 
         return config, api, client_manager, project_manager, task_manager, time_tracker
-    
+
     except ClockifyAPIError as e:
         print(f"Error initializing Clockify API: {e}")
         sys.exit(1)

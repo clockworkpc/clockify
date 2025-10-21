@@ -10,12 +10,15 @@ from .utils import get_user_selection
 class ClientManager:
     """Handles client selection and management."""
 
-    def __init__(self, api: ClockifyAPI, config: ClockifyConfig):
+    def __init__(self, api: ClockifyAPI, config: ClockifyConfig, cache=None):
         self.api = api
         self.config = config
+        self.cache = cache
 
     def get_clients(self) -> List[dict]:
         """Get all clients from the workspace."""
+        if self.cache:
+            return self.cache.get_clients()
         return self.api.get_clients()
 
     def get_client_names(self) -> List[str]:

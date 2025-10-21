@@ -11,22 +11,48 @@ from .utils import get_user_selection
 
 class TaskDescriptionManager:
     """Handles task selection and description management."""
-    
-    def __init__(self, api: ClockifyAPI, config: ClockifyConfig, project_manager: ProjectManager):
+
+    def __init__(self, api: ClockifyAPI, config: ClockifyConfig, project_manager: ProjectManager, cache=None):
         self.api = api
         self.config = config
         self.project_manager = project_manager
-    
+        self.cache = cache
+
     def get_formal_tasks_for_project(self, project_id: str) -> List[Dict]:
         """Get all formal tasks for a specific project."""
         try:
+            if self.cache:
+                return self.cache.get_project_tasks(project_id)
             return self.api.get_project_tasks(project_id)
         except Exception:
             return []
-    
+
     def get_descriptions_for_task(self, project_id: str, task_id: str, task_name: str, limit: int = 100) -> List[str]:
         """Get unique descriptions used with a specific task."""
-        return self.api.get_descriptions_for_task(project_id, task_id, task_name, limit)
+        # Get time entries from cache if available
+        if self.cache:
+            entries = self.cache.get_time_entries(limit)
+        else:
+            entries = self.api.get_time_entries(limit)
+
+        # Process entries to extract descriptions
+        descriptions = set()
+        for entry in entries:
+            entry_project_id = entry.get("projectId")
+            entry_task_id = entry.get("taskId")
+            entry_description = entry.get("description", "").strip()
+
+            # Must be from the same project and have a description
+            if entry_project_id != project_id or not entry_description:
+                continue
+
+            # Include entries that either:
+            # 1. Have the matching task ID, OR
+            # 2. Have no task ID (legacy entries from before formal tasks were assigned)
+            if entry_task_id == task_id or entry_task_id is None:
+                descriptions.add(entry_description)
+
+        return sorted(list(descriptions))
     
     def select_task_interactive(self) -> Optional[Tuple[str, str, str]]:
         """Interactively select a task from current project.
@@ -381,15 +407,20 @@ class TaskDescriptionManager:
         try:
             print(f"Creating formal task '{task_name}' in project '{current_project['name']}'...")
             new_task = self.api.create_task(current_project["id"], task_name)
-            
+
             if new_task and new_task.get("id"):
                 print(f"Task '{task_name}' created successfully!")
                 print(f"Task ID: {new_task['id']}")
+
+                # Invalidate cache for this project's tasks
+                if self.cache:
+                    self.cache.invalidate_tasks(current_project["id"])
+
                 return True
             else:
                 print(f"Error: Failed to create task '{task_name}'")
                 return False
-        
+
         except Exception as e:
             print(f"Error creating task '{task_name}': {e}")
             return False
@@ -428,21 +459,25 @@ class TaskDescriptionManager:
         try:
             print(f"Deleting task '{task_name}' from project '{current_project['name']}'...")
             success = self.api.delete_task(current_project["id"], task_to_delete["id"])
-            
+
             if success:
                 print(f"Task '{task_name}' deleted successfully!")
-                
+
+                # Invalidate cache for this project's tasks
+                if self.cache:
+                    self.cache.invalidate_tasks(current_project["id"])
+
                 # Clear current task if it was the deleted one
                 if self.config.task_id == task_to_delete["id"]:
                     self.config.task_id = None
                     self.config.task_name = None
                     print("Cleared current task setting as it was deleted.")
-                
+
                 return True
             else:
                 print(f"Error: Failed to delete task '{task_name}'")
                 return False
-        
+
         except Exception as e:
             print(f"Error deleting task '{task_name}': {e}")
             return False

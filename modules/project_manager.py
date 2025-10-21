@@ -9,13 +9,16 @@ from .utils import get_user_selection
 
 class ProjectManager:
     """Handles project selection and management."""
-    
-    def __init__(self, api: ClockifyAPI, config: ClockifyConfig):
+
+    def __init__(self, api: ClockifyAPI, config: ClockifyConfig, cache=None):
         self.api = api
         self.config = config
-    
+        self.cache = cache
+
     def get_projects(self) -> List[dict]:
         """Get all projects from the workspace."""
+        if self.cache:
+            return self.cache.get_projects()
         return self.api.get_projects()
     
     def get_project_names(self) -> List[str]:
@@ -89,7 +92,7 @@ class ProjectManager:
 
                 if not filtered_projects:
                     from .client_manager import ClientManager
-                    client_manager = ClientManager(self.api, self.config)
+                    client_manager = ClientManager(self.api, self.config, self.cache)
                     current_client = client_manager.get_current_client()
                     client_name = current_client["name"] if current_client else self.config.client_id
                     print(f"No projects found for client: {client_name}")
@@ -103,7 +106,7 @@ class ProjectManager:
             # Display current client if set
             if self.config.client_id:
                 from .client_manager import ClientManager
-                client_manager = ClientManager(self.api, self.config)
+                client_manager = ClientManager(self.api, self.config, self.cache)
                 current_client = client_manager.get_current_client()
                 if current_client:
                     print(f"\nCurrent Client: {current_client['name']}")
@@ -132,7 +135,7 @@ class ProjectManager:
                 # Handle "0" to open client selection
                 if selection == "0":
                     from .client_manager import ClientManager
-                    client_manager = ClientManager(self.api, self.config)
+                    client_manager = ClientManager(self.api, self.config, self.cache)
                     result = client_manager.select_client_interactive()
                     if result:
                         client_id, client_name = result
