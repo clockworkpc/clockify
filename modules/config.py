@@ -174,6 +174,20 @@ class ClockifyConfig:
         else:
             self.set("previous_task", value)
 
+    @property
+    def last_stop_time(self) -> Optional[float]:
+        """Get timestamp of last stop from state."""
+        return self.get_state("last_stop_time")
+
+    @last_stop_time.setter
+    def last_stop_time(self, value: Optional[float]) -> None:
+        """Set timestamp of last stop in state."""
+        if value is None:
+            self._state.pop("last_stop_time", None)
+            self.save_state()
+        else:
+            self.set_state("last_stop_time", value)
+
     def is_configured(self) -> bool:
         """Check if basic configuration is present."""
         return bool(self.token and self.workspace_id)

@@ -2,6 +2,7 @@
 Time tracking functionality for Clockify CLI.
 """
 from typing import Optional, Dict, Any
+import time
 from .api_client import ClockifyAPI, ClockifyAPIError
 from .config import ClockifyConfig
 from .project_manager import ProjectManager
@@ -11,12 +12,13 @@ from .utils import show_notification, format_duration, calculate_elapsed_minutes
 
 class TimeTracker:
     """Handles time entry start/stop operations and info display."""
-    
+
     def __init__(self, api: ClockifyAPI, config: ClockifyConfig, project_manager: ProjectManager):
         self.api = api
         self.config = config
         self.project_manager = project_manager
         self.pomodoro = PomodoroIntegration()
+        self._last_stop_time = None
     
     def is_tracking(self) -> bool:
         """Check if currently tracking time."""
@@ -76,12 +78,24 @@ class TimeTracker:
                 print(f"Warning: Could not validate task: {e}")
                 print("Continuing with the provided task ID...")
 
-        # For Pomodoro integration: only start if not in break state
+        # For Pomodoro integration: only prevent start if actively in break state
         if self.pomodoro.is_available():
             current_state = self.pomodoro.get_current_state()
-            if current_state and current_state != "pomodoro":
-                print(f"Pomodoro not in work state ({current_state}), skipping Clockify start")
+            # Only block if actively in a break state (short-break or long-break)
+            # Allow starting if state is null/None (idle) or already "pomodoro"
+            if current_state in ["short-break", "long-break"]:
+                print(f"Pomodoro in break state ({current_state}), skipping Clockify start")
                 return False
+
+            # Prevent spurious resume: if we stopped recently and state is null,
+            # it's likely Gnome Pomodoro auto-detecting activity after manual stop
+            if current_state is None or current_state == "null":
+                last_stop = self.config.last_stop_time
+                if last_stop:
+                    time_since_stop = time.time() - last_stop
+                    if time_since_stop < 10:  # Within 10 seconds
+                        print(f"Ignoring resume request {time_since_stop:.1f}s after stop (likely spurious)")
+                        return False
         
         try:
             description_text = self.config.description
@@ -96,6 +110,7 @@ class TimeTracker:
             
             if entry and entry.get("id"):
                 self.config.current_entry_id = entry["id"]
+                self.config.last_stop_time = None  # Clear stop time cooldown
                 print(f"Time entry started successfully (ID: {entry['id']})")
                 show_notification(f"Time entry started: {description_text}")
                 return True
@@ -120,7 +135,10 @@ class TimeTracker:
             
             if result and result.get("id"):
                 self.config.current_entry_id = None  # Clear state
+                self.config.last_stop_time = time.time()  # Record stop time for cooldown
+                description = result.get('description', 'Unknown')
                 print(f"Time entry stopped successfully (ID: {result['id']})")
+                show_notification(f"Time entry stopped: {description}")
                 return True
             else:
                 print("Error: Failed to stop time entry")
@@ -130,6 +148,7 @@ class TimeTracker:
             print(f"Error stopping time entry: {e}")
             # Clear state file even if API call failed
             self.config.current_entry_id = None
+            self.config.last_stop_time = time.time()  # Record stop time for cooldown
             return False
     
     def change_description(self, new_description: str) -> bool:

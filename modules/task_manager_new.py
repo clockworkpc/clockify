@@ -56,22 +56,24 @@ class TaskDescriptionManager:
     
     def select_task_interactive(self) -> Optional[Tuple[str, str, str]]:
         """Interactively select a task from current project.
-        
+
         Returns:
             Tuple of (task_id, task_name, project_id) or None if cancelled
+            Returns ("BACK", None, None) if user wants to go back to project selection
         """
         current_project = self.project_manager.get_current_project()
         if not current_project:
             print("No current project found. Set a project first.")
             return None
-        
+
         # Get formal tasks for current project
         formal_tasks = self.get_formal_tasks_for_project(current_project["id"])
-        
-        # Create display options - always include create option
-        task_names = [task["name"] for task in formal_tasks]
+
+        # Create display options - add back option, then tasks, then create option
+        task_names = ["[Go back to Projects]"]
+        task_names.extend([task["name"] for task in formal_tasks])
         task_names.append("[Create new task]")
-        
+
         # Find current task for highlighting
         current_task_name = None
         if self.config.task_id:
@@ -79,7 +81,7 @@ class TaskDescriptionManager:
                 if task["id"] == self.config.task_id:
                     current_task_name = task["name"]
                     break
-        
+
         result = get_user_selection(
             task_names,
             f"Formal tasks for project: {current_project['name']}",
@@ -88,32 +90,38 @@ class TaskDescriptionManager:
 
         if result is not None:
             selection_index, user_input = result
+            # If "Go back to Projects" was selected
+            if selection_index == 0:
+                return ("BACK", None, None)
             # If "Create new task" was selected
-            if selection_index == len(formal_tasks):
+            elif selection_index == len(task_names) - 1:
                 # If user provided input via auto-select, use it
                 if user_input:
                     return self._create_new_task_with_name(current_project, user_input)
                 else:
                     return self._create_new_task_interactive(current_project)
             else:
-                selected_task = formal_tasks[selection_index]
+                # Regular task selection (adjust index for the back option)
+                selected_task = formal_tasks[selection_index - 1]
                 return (selected_task["id"], selected_task["name"], current_project["id"])
 
         return None
     
     def select_description_interactive(self, task_id: str, task_name: str, project_id: str) -> Optional[str]:
         """Interactively select or create a description for a task.
-        
+
         Returns:
             Selected or created description, or None if cancelled
+            Returns "BACK" if user wants to go back to task selection
         """
         # Get existing descriptions for this task
         existing_descriptions = self.get_descriptions_for_task(project_id, task_id, task_name)
-        
-        # Create options
-        options = existing_descriptions.copy()
+
+        # Create options - add back option, then descriptions, then new description option
+        options = ["[Go back to Tasks]"]
+        options.extend(existing_descriptions)
         options.append("[Enter new description]")
-        
+
         # Find current description for highlighting
         current_description = self.config.description
 
@@ -125,15 +133,19 @@ class TaskDescriptionManager:
 
         if result is not None:
             selection_index, user_input = result
+            # If "Go back to Tasks" was selected
+            if selection_index == 0:
+                return "BACK"
             # If "Enter new description" was selected
-            if selection_index == len(existing_descriptions):
+            elif selection_index == len(options) - 1:
                 # If user provided input via auto-select, use it directly
                 if user_input:
                     return user_input
                 else:
                     return self._create_new_description_interactive(task_name)
             else:
-                return existing_descriptions[selection_index]
+                # Regular description selection (adjust index for the back option)
+                return existing_descriptions[selection_index - 1]
 
         return None
     
@@ -207,26 +219,39 @@ class TaskDescriptionManager:
     
     def select_task_and_description_interactive(self) -> Optional[Tuple[str, str, str]]:
         """Full interactive selection: Task -> Description.
-        
+
         Returns:
             Tuple of (task_id, task_name, description) or None if cancelled
+            Returns ("BACK", None, None) if user wants to go back to project selection
         """
-        # Step 1: Select task
-        task_result = self.select_task_interactive()
-        if not task_result:
-            return None
-        
-        task_id, task_name, project_id = task_result
-        
-        print(f"\nSelected task: {task_name}")
-        print()
-        
-        # Step 2: Select description
-        description = self.select_description_interactive(task_id, task_name, project_id)
-        if not description:
-            return None
-        
-        return (task_id, task_name, description)
+        while True:
+            # Step 1: Select task
+            task_result = self.select_task_interactive()
+            if not task_result:
+                return None
+
+            task_id, task_name, project_id = task_result
+
+            # Check if user wants to go back to project selection
+            if task_id == "BACK":
+                return ("BACK", None, None)
+
+            print(f"\nSelected task: {task_name}")
+            print()
+
+            # Step 2: Select description (loop until valid selection or cancel)
+            while True:
+                description = self.select_description_interactive(task_id, task_name, project_id)
+                if not description:
+                    return None
+
+                # Check if user wants to go back to task selection
+                if description == "BACK":
+                    print()
+                    break  # Break inner loop to go back to task selection
+
+                # Valid description selected
+                return (task_id, task_name, description)
     
     def set_current_task_and_description(self, task_id: Optional[str], task_name: Optional[str], description: str,
                                        project_id: Optional[str] = None, client_id: Optional[str] = None,

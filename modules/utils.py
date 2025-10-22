@@ -49,7 +49,7 @@ def calculate_elapsed_minutes(start_time: str) -> float:
 def show_notification(message: str) -> None:
     """Show desktop notification using xcowsay if available."""
     try:
-        subprocess.run(['xcowsay', message], check=False, capture_output=True)
+        subprocess.run(['xcowsay', '--time=0.75', message], check=False, capture_output=True)
     except FileNotFoundError:
         # xcowsay not available, try notify-send
         try:

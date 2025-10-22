@@ -118,11 +118,17 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def setup_components(args) -> tuple:
-    """Initialize all components with configuration."""
+def setup_components(args, load_data: bool = True) -> tuple:
+    """Initialize all components with configuration.
+
+    Args:
+        args: Command line arguments
+        load_data: If True, preload all workspace data. Set to False for simple
+                   start/stop commands to improve performance.
+    """
     # Load configuration
     config = ClockifyConfig()
-    
+
     # Apply command line overrides
     if args.token:
         config.token = args.token
@@ -134,7 +140,7 @@ def setup_components(args) -> tuple:
         config.description = args.description
     elif args.task_name:  # Backward compatibility
         config.description = args.task_name
-    
+
     # Check required configuration
     missing = config.get_missing_config()
     if missing:
@@ -143,14 +149,15 @@ def setup_components(args) -> tuple:
             print(f"  - {item}")
         print("\nUse --token and --workspace-id options or configure them first.")
         sys.exit(1)
-    
+
     # Initialize components
     try:
         api = ClockifyAPI(config.token, config.workspace_id)
 
-        # Initialize cache and load all data at startup
+        # Initialize cache and optionally load all data at startup
         cache = DataCache(api)
-        cache.load_all(time_entries_limit=100)
+        if load_data:
+            cache.load_all(time_entries_limit=100)
 
         client_manager = ClientManager(api, config, cache)
         project_manager = ProjectManager(api, config, cache)
@@ -166,11 +173,18 @@ def setup_components(args) -> tuple:
 
 def handle_time_commands(args, time_tracker: TimeTracker) -> None:
     """Handle time tracking commands."""
+    # Debug: Log the command and pomodoro state
+    import sys
+    pomodoro = PomodoroIntegration()
+    if pomodoro.is_available():
+        current_state = pomodoro.get_current_state()
+        print(f"DEBUG: Command={args.command}, Pomodoro state={current_state}", file=sys.stderr)
+
     if args.command in ["start", "resume"]:
         success = time_tracker.start_tracking(args.task_name, args.project_id)
         if not success:
             sys.exit(1)
-    
+
     elif args.command in ["stop", "pause", "complete"]:
         success = time_tracker.stop_tracking()
         if not success:
@@ -335,74 +349,56 @@ def handle_project_task_commands(project_manager: ProjectManager,
                                  task_manager: TaskDescriptionManager,
                                  client_manager: ClientManager) -> None:
     """Handle combined project-task selection with automatic client update."""
-    # Step 1: Select project
-    result = project_manager.select_project_interactive()
-    if not result:
-        print("Project selection cancelled")
-        return
+    while True:
+        # Step 1: Select project
+        result = project_manager.select_project_interactive()
+        if not result:
+            print("Project selection cancelled")
+            return
 
-    project_id, project_name = result
+        project_id, project_name = result
 
-    # Step 2: Check if project has a different client and update if needed
-    project = project_manager.find_project_by_id(project_id)
-    if project and project.get("clientId"):
-        current_client_id = client_manager.config.client_id
-        project_client_id = project["clientId"]
+        # Step 2: Check if project has a different client and update if needed
+        project = project_manager.find_project_by_id(project_id)
+        if project and project.get("clientId"):
+            current_client_id = client_manager.config.client_id
+            project_client_id = project["clientId"]
 
-        # If the project belongs to a different client, update the client
-        if current_client_id != project_client_id:
-            client = client_manager.find_client_by_id(project_client_id)
-            if client:
-                client_manager.config.client_id = project_client_id
-                print(f"Client automatically updated to: {client['name']}")
+            # If the project belongs to a different client, update the client
+            if current_client_id != project_client_id:
+                client = client_manager.find_client_by_id(project_client_id)
+                if client:
+                    client_manager.config.client_id = project_client_id
+                    print(f"Client automatically updated to: {client['name']}")
 
-    # Step 3: Set the project
-    project_manager.set_current_project(project_id)
-    print()
+        # Step 3: Set the project
+        project_manager.set_current_project(project_id)
+        print()
 
-    # Step 4: Select task
-    result = task_manager.select_task_and_description_interactive()
-    if result:
+        # Step 4: Select task and description
+        result = task_manager.select_task_and_description_interactive()
+        if not result:
+            print("Task/description selection cancelled")
+            return
+
         task_id, task_name, description = result
+
+        # Check if user wants to go back to project selection
+        if task_id == "BACK":
+            print()
+            continue  # Loop back to project selection
+
+        # Valid task and description selected
         task_manager.set_current_task_and_description(task_id, task_name, description)
-    else:
-        print("Task/description selection cancelled")
+        break  # Exit the loop
 
 
-def main():
-    """Main application entry point."""
-    # Handle Pomodoro triggers - these come as single arguments with spaces
-    # e.g., "start enable", "skip disable"
-    if len(sys.argv) == 2 and ' ' in sys.argv[1]:
-        trigger_parts = sys.argv[1].split()
-        sys.argv = [sys.argv[0]] + trigger_parts
-    
-    parser = create_parser()
-    args = parser.parse_args()
-    
-    # Handle --description only (backward compatibility with --task-name)
-    description_arg = args.description or args.task_name
-    if (not args.command and description_arg and
-        ((len(sys.argv) == 3 and sys.argv[1] == "--description") or
-         (len(sys.argv) == 3 and sys.argv[1] == "--task-name"))):
-        try:
-            config, api, client_manager, project_manager, task_manager, time_tracker = setup_components(args)
-            time_tracker.change_description(description_arg)
-            return
-        except SystemExit:
-            return
-    
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
-    # Setup components
-    config, api, client_manager, project_manager, task_manager, time_tracker = setup_components(args)
-    
+def run_command(args, config, api, client_manager, project_manager, task_manager, time_tracker):
+    """Execute a single command."""
     # Handle commands
     if args.command in ["start", "resume", "stop", "pause", "complete", "skip"]:
         handle_time_commands(args, time_tracker)
-    
+
     elif args.command == "info":
         time_tracker.show_info()
 
@@ -411,7 +407,7 @@ def main():
 
     elif args.command == "project":
         handle_project_commands(args, project_manager)
-    
+
     elif args.command == "task":
         handle_task_commands(args, task_manager)
 
@@ -432,11 +428,93 @@ def main():
 
     elif args.command == "projects":
         project_manager.list_projects()
-    
+
     else:
         print(f"Unknown command: {args.command}")
+        sys.exit(1)
+
+
+def main():
+    """Main application entry point."""
+    # Debug: Log raw command line arguments
+    import sys
+    if len(sys.argv) > 1:
+        print(f"DEBUG: Raw argv={sys.argv}", file=sys.stderr)
+
+    # Handle Pomodoro triggers - these come as single arguments with spaces
+    # e.g., "start enable", "skip disable"
+    if len(sys.argv) == 2 and ' ' in sys.argv[1]:
+        trigger_parts = sys.argv[1].split()
+        print(f"DEBUG: Parsed trigger parts={trigger_parts}", file=sys.stderr)
+        sys.argv = [sys.argv[0]] + trigger_parts
+
+    parser = create_parser()
+    args = parser.parse_args()
+
+    # Handle --description only (backward compatibility with --task-name)
+    description_arg = args.description or args.task_name
+    if (not args.command and description_arg and
+        ((len(sys.argv) == 3 and sys.argv[1] == "--description") or
+         (len(sys.argv) == 3 and sys.argv[1] == "--task-name"))):
+        try:
+            # Description change doesn't need full data loading
+            config, api, client_manager, project_manager, task_manager, time_tracker = setup_components(args, load_data=False)
+            time_tracker.change_description(description_arg)
+            return
+        except SystemExit:
+            return
+
+    if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    # Determine if we need to load all workspace data
+    # Simple time tracking commands don't need the full data cache
+    simple_commands = ["start", "resume", "stop", "pause", "complete", "skip"]
+    needs_data = args.command not in simple_commands
+
+    # Setup components once (data loaded via HTTP only once if needed)
+    config, api, client_manager, project_manager, task_manager, time_tracker = setup_components(args, load_data=needs_data)
+
+    # Run the first command
+    run_command(args, config, api, client_manager, project_manager, task_manager, time_tracker)
+
+    # Loop to allow multiple commands without reloading data
+    while True:
+        try:
+            print()
+            continue_choice = input("Continue with another command? (y/n): ").strip().lower()
+            if continue_choice not in ['y', 'yes']:
+                print("Exiting...")
+                break
+
+            print("\nAvailable commands: project-task, start, stop, info, switch")
+            command = input("Enter command: ").strip()
+
+            if not command:
+                continue
+
+            # Create new args object with the command
+            if command == "project-task":
+                handle_project_task_commands(project_manager, task_manager, client_manager)
+            elif command in ["start", "resume"]:
+                time_tracker.start_tracking()
+            elif command in ["stop", "pause", "complete"]:
+                time_tracker.stop_tracking()
+            elif command == "info":
+                time_tracker.show_info()
+            elif command == "switch":
+                task_manager.switch_to_previous_task()
+            else:
+                print(f"Unknown command: {command}")
+                print("Available: project-task, start, stop, info, switch")
+
+        except KeyboardInterrupt:
+            print("\n\nExiting...")
+            break
+        except EOFError:
+            print("\nExiting...")
+            break
 
 
 if __name__ == "__main__":
