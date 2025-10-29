@@ -15,6 +15,7 @@ from modules.project_manager import ProjectManager
 from modules.task_manager_new import TaskDescriptionManager
 from modules.time_tracker import TimeTracker
 from modules.pomodoro import PomodoroIntegration, PomodoroError
+from modules.events import PomodoroEventExtractor
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -98,6 +99,18 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Switch command - switch back to previous task
     switch_parser = subparsers.add_parser("switch", help="Switch back to previous task (like 'cd -' or 'git checkout -')")
+
+    # Events commands
+    events_parser = subparsers.add_parser("events", help="Pomodoro event logging")
+    events_subparsers = events_parser.add_subparsers(dest="events_action")
+
+    events_extract_parser = events_subparsers.add_parser("extract", help="Extract events from journalctl")
+    events_extract_parser.add_argument("--since", default="1 day ago", help="Time period (e.g., '1 day ago', 'today', '1 week ago')")
+
+    events_list_parser = events_subparsers.add_parser("list", help="List saved events")
+    events_list_parser.add_argument("--limit", type=int, help="Limit number of events to show")
+
+    events_clear_parser = events_subparsers.add_parser("clear", help="Clear all saved events")
 
     # Legacy command aliases for compatibility
     tasks_parser = subparsers.add_parser("tasks", help="List tasks (legacy alias)")
@@ -345,6 +358,46 @@ def handle_pomodoro_commands(args, time_tracker: TimeTracker) -> None:
         sys.exit(1)
 
 
+def handle_events_commands(args) -> None:
+    """Handle pomodoro event logging commands."""
+    extractor = PomodoroEventExtractor()
+
+    if not args.events_action or args.events_action == "extract":
+        # Extract events from journalctl
+        since = args.since if hasattr(args, 'since') else "1 day ago"
+        events = extractor.extract_events(since=since)
+        extractor.save_to_file()
+        print(f"Extracted and saved {len(events)} events from journalctl (since {since})")
+
+    elif args.events_action == "list":
+        # List saved events
+        limit = args.limit if hasattr(args, 'limit') else None
+        events = extractor.get_saved_events(limit=limit)
+
+        if not events:
+            print("No saved events found")
+            return
+
+        print(f"\nPomodoro Events ({len(events)} total):")
+        print("=" * 80)
+
+        for event in events:
+            event_type = event.get("event_type", "unknown")
+            timestamp = event.get("timestamp", "")
+            description = event.get("description", "")
+
+            # Format output
+            print(f"{timestamp:20} {event_type:10}", end="")
+            if description:
+                print(f" {description}", end="")
+            print()
+
+    elif args.events_action == "clear":
+        # Clear all saved events
+        extractor.clear_events()
+        print("All saved events cleared")
+
+
 def handle_project_task_commands(project_manager: ProjectManager,
                                  task_manager: TaskDescriptionManager,
                                  client_manager: ClientManager) -> None:
@@ -422,6 +475,9 @@ def run_command(args, config, api, client_manager, project_manager, task_manager
     elif args.command == "pomodoro":
         handle_pomodoro_commands(args, time_tracker)
 
+    elif args.command == "events":
+        handle_events_commands(args)
+
     # Legacy aliases
     elif args.command == "tasks":
         task_manager.list_tasks()
@@ -467,6 +523,11 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    # Handle events command without requiring Clockify setup
+    if args.command == "events":
+        handle_events_commands(args)
+        return
 
     # Determine if we need to load all workspace data
     # Simple time tracking commands don't need the full data cache
