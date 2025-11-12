@@ -53,6 +53,97 @@ class TaskDescriptionManager:
                 descriptions.add(entry_description)
 
         return sorted(list(descriptions))
+
+    def get_recent_combinations(self, limit: int = 5) -> List[Dict]:
+        """Get the N most recent unique client-project-task-description combinations.
+
+        Returns:
+            List of dicts with keys: client_id, client_name, project_id, project_name,
+            task_id, task_name, description, timestamp
+        """
+        # Get time entries from cache if available
+        if self.cache:
+            entries = self.cache.get_time_entries(100)  # Get more entries to find unique combinations
+        else:
+            entries = self.api.get_time_entries(100)
+
+        # Track unique combinations (keyed by tuple to detect duplicates)
+        seen_combinations = set()
+        recent_combinations = []
+
+        # Iterate through entries (already sorted by most recent first from API)
+        for entry in entries:
+            # Skip entries without required fields
+            description = entry.get("description", "").strip()
+            if not description:
+                continue
+
+            project_id = entry.get("projectId")
+            if not project_id:
+                continue
+
+            # Get timestamp from entry
+            time_interval = entry.get("timeInterval", {})
+            timestamp = time_interval.get("start") or time_interval.get("end")
+            if not timestamp:
+                continue
+
+            # Get task info
+            task_id = entry.get("taskId")
+            task_name = None
+
+            # Get project info
+            project = self.project_manager.find_project_by_id(project_id)
+            if not project:
+                continue
+            project_name = project.get("name", "Unknown")
+
+            # Get client info
+            client_id = project.get("clientId")
+            client_name = None
+            if client_id:
+                # Get client name from ClientManager
+                clients = self.api.get_clients() if not self.cache else self.cache.get_clients()
+                for client in clients:
+                    if client.get("id") == client_id:
+                        client_name = client.get("name", "Unknown")
+                        break
+
+            # Get task name if task_id exists
+            if task_id:
+                try:
+                    tasks = self.get_formal_tasks_for_project(project_id)
+                    for task in tasks:
+                        if task.get("id") == task_id:
+                            task_name = task.get("name")
+                            break
+                except Exception:
+                    pass
+
+            # Create unique key (combination of all relevant fields)
+            combination_key = (client_id, project_id, task_id, description)
+
+            # Skip if we've already seen this exact combination
+            if combination_key in seen_combinations:
+                continue
+
+            seen_combinations.add(combination_key)
+            recent_combinations.append({
+                "client_id": client_id,
+                "client_name": client_name,
+                "project_id": project_id,
+                "project_name": project_name,
+                "task_id": task_id,
+                "task_name": task_name,
+                "description": description,
+                "timestamp": timestamp
+            })
+
+            # Stop once we have enough unique combinations
+            if len(recent_combinations) >= limit:
+                break
+
+        return recent_combinations
     
     def select_task_interactive(self) -> Optional[Tuple[str, str, str]]:
         """Interactively select a task from current project.

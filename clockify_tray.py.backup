@@ -11,7 +11,6 @@ import subprocess
 import json
 import os
 import sys
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -358,24 +357,13 @@ class ClockifyTray:
             print(f"Error loading Clockify configuration: {e}")
             sys.exit(1)
 
-        # Create indicator with retry logic for display connection
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                self.indicator = AppIndicator3.Indicator.new(
-                    "clockify-timer",
-                    "clockify",  # Use Clockify icon
-                    AppIndicator3.IndicatorCategory.APPLICATION_STATUS
-                )
-                self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"Display not ready (attempt {attempt + 1}/{max_retries}), retrying in 2s: {e}")
-                    time.sleep(2)
-                else:
-                    print(f"Failed to create system tray indicator after {max_retries} attempts: {e}")
-                    sys.exit(1)
+        # Create indicator
+        self.indicator = AppIndicator3.Indicator.new(
+            "clockify-timer",
+            "clockify",  # Use Clockify icon
+            AppIndicator3.IndicatorCategory.APPLICATION_STATUS
+        )
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 
         # Initial state
         self.current_entry = None
@@ -443,7 +431,7 @@ class ClockifyTray:
 
         # Refresh
         refresh_item = Gtk.MenuItem(label="Refresh Now")
-        refresh_item.connect("activate", lambda x: self.update_from_api())
+        refresh_item.connect("activate", lambda x: self.update_timer())
         menu.append(refresh_item)
 
         # Quit

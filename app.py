@@ -402,6 +402,30 @@ def handle_project_task_commands(project_manager: ProjectManager,
                                  task_manager: TaskDescriptionManager,
                                  client_manager: ClientManager) -> None:
     """Handle combined project-task selection with automatic client update."""
+    from modules.utils import get_user_selection, display_markdown
+
+    # Step 0: Display recent combinations as a markdown table
+    recent_combinations = task_manager.get_recent_combinations(limit=5)
+
+    if recent_combinations:
+        # Build markdown table
+        markdown_table = "## Recent Client-Project-Task-Description Combinations\n\n"
+        markdown_table += "| # | Client | Project | Task | Description |\n"
+        markdown_table += "|---|--------|---------|------|-------------|\n"
+
+        for idx, combo in enumerate(recent_combinations, 1):
+            client = combo['client_name'] if combo['client_name'] else "(no client)"
+            project = combo['project_name']
+            task = combo['task_name'] if combo['task_name'] else "(no task)"
+            desc = combo['description']
+
+            markdown_table += f"| {idx} | {client} | {project} | {task} | {desc} |\n"
+
+        # Display using bat if available
+        display_markdown(markdown_table)
+        print()  # Add spacing before manual selection
+
+    # Continue with normal project-task selection flow
     while True:
         # Step 1: Select project
         result = project_manager.select_project_interactive()
