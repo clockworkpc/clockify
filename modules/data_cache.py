@@ -1,3 +1,5 @@
+import os
+
 """
 Data caching system for Clockify CLI.
 Loads all data once at startup to avoid repeated API calls during menu interactions.
@@ -44,6 +46,9 @@ class DataCache:
 
         self._loaded = True
         print("Done!")
+
+        # clear the console after loading
+        os.system("cls" if os.name == "nt" else "clear")
 
     def refresh(self, time_entries_limit: int = 100) -> None:
         """Refresh all cached data."""

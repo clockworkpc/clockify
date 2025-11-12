@@ -423,7 +423,77 @@ def handle_project_task_commands(project_manager: ProjectManager,
 
         # Display using bat if available
         display_markdown(markdown_table)
-        print()  # Add spacing before manual selection
+        print()
+
+        # Show current configuration
+        print("\nCurrent configuration:")
+        current_client = "(not set)"
+        current_project = "(not set)"
+        current_task = "(not set)"
+        current_description = "(not set)"
+
+        if client_manager.config.client_id:
+            client = client_manager.find_client_by_id(client_manager.config.client_id)
+            if client:
+                current_client = client.get('name', current_client)
+
+        if project_manager.config.project_id:
+            project = project_manager.find_project_by_id(project_manager.config.project_id)
+            if project:
+                current_project = project.get('name', current_project)
+
+        if task_manager.config.task_name:
+            current_task = task_manager.config.task_name
+
+        if task_manager.config.description:
+            current_description = task_manager.config.description
+
+        print(f"  Client: {current_client}")
+        print(f"  Project: {current_project}")
+        print(f"  Task: {current_task}")
+        print(f"  Description: {current_description}")
+        print()
+
+        # Prompt user to select from recent or continue with manual selection
+        while True:
+            try:
+                choice = input(f"Select 1-{len(recent_combinations)} for quick selection, or press Enter for manual selection: ").strip()
+
+                if not choice:
+                    # User pressed Enter - continue with manual selection
+                    print()
+                    break
+
+                # Try to parse as number
+                try:
+                    selection_num = int(choice)
+                    if 1 <= selection_num <= len(recent_combinations):
+                        # Valid selection - use this combination
+                        combo = recent_combinations[selection_num - 1]
+
+                        # Set all the configuration at once
+                        task_manager.set_current_task_and_description(
+                            combo['task_id'],
+                            combo['task_name'],
+                            combo['description'],
+                            combo['project_id'],
+                            combo['client_id']
+                        )
+
+                        print(f"\nQuick selection applied:")
+                        print(f"  Client: {combo['client_name'] or '(none)'}")
+                        print(f"  Project: {combo['project_name']}")
+                        print(f"  Task: {combo['task_name'] or '(none)'}")
+                        print(f"  Description: {combo['description']}")
+                        return
+                    else:
+                        print(f"Please enter a number between 1 and {len(recent_combinations)}, or press Enter for manual selection.")
+                except ValueError:
+                    print(f"Please enter a number between 1 and {len(recent_combinations)}, or press Enter for manual selection.")
+
+            except KeyboardInterrupt:
+                print("\nSelection cancelled")
+                return
 
     # Continue with normal project-task selection flow
     while True:
