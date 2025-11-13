@@ -410,8 +410,9 @@ def handle_project_task_commands(project_manager: ProjectManager,
     if recent_combinations:
         # Build markdown table
         markdown_table = "## Recent Client-Project-Task-Description Combinations\n\n"
-        markdown_table += "| # | Client | Project | Task | Description |\n"
-        markdown_table += "|---|--------|---------|------|-------------|\n"
+        markdown_table += "| # | Description | Task | Project | Client |\n"
+        # markdown_table += "| # | Client | Project | Task | Description |\n"
+        markdown_table += "|--------|---------|------|-------------|---|\n"
 
         for idx, combo in enumerate(recent_combinations, 1):
             client = combo['client_name'] if combo['client_name'] else "(no client)"
@@ -419,7 +420,7 @@ def handle_project_task_commands(project_manager: ProjectManager,
             task = combo['task_name'] if combo['task_name'] else "(no task)"
             desc = combo['description']
 
-            markdown_table += f"| {idx} | {client} | {project} | {task} | {desc} |\n"
+            markdown_table += f"| {idx} | {desc} | {task} | {project} | {client} |\n"
 
         # Display using bat if available
         display_markdown(markdown_table)
